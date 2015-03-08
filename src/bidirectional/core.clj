@@ -50,6 +50,11 @@
                                    (:c-typ c-elem)))
                  ctx)))
 
+(defn unsolved
+  "returns unsolved existentials?"
+  [ctx]
+  (throw (Exception. "TODO")))
+
 (defn type-apply
   "??? Maybe looks up a type with the solved existentals replaced with what they're solved with?
    takes a type and returns a type."
@@ -63,6 +68,11 @@
                 (type-apply ctx typ')
                 typ)
     typ))
+
+(defn c-marker
+  "constructor"
+  [c-var-name]
+  {:c-op :c-exists :c-var-name c-var-name})
 
 (defn c-exists
   "constructor"
@@ -101,12 +111,6 @@
 (defn free-t-vars
   [ctx]
   (throw (Exception. "TODO")))
-
-(defn rename-var
-  "a var in expression form."
-  [expr new-name]
-  (assert (= (:op expr) :local) "tried to rename not-a-local var")
-  (assoc-in expr :name new-name))
 
 (def sample-env
   (assoc (taj/empty-env)
@@ -167,13 +171,52 @@
                              (:t-ret typ))
                   (ctx-drop ctx-elem))))
     ;; subtype - TODO: does this "else" work for us, even though we have a bigger :op space?
-    (let [{typ' :typ ctx' :ctx} (typesynth ctx expr)]
+    (let [{typ' :type ctx' :ctx} (typesynth ctx expr)]
       (subtype ctx' (ctx-apply ctx' typ') (ctx-apply ctx' typ)))))
 
-(defn typesynth [ctx expr]
+(defn typesynth
+  "returns {:type t :ctx c}"
+  [ctx expr]
   (case (:op expr)
     :with-meta (typesynth ctx (:expr expr))
-    :fn :TODO))
+    :annotation {:type (:type expr) :ctx (typecheck ctx (:expr expr) (:type expr))} ; TODO This doesn't exist in source
+    :fn (do (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
+            (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
+            (let [param-name (:name (first (:params (first (:methods expr)))))
+                  ctx-var-name (gensym param-name) ; Since param-name is gensymmed, I'm guessing we can just use the existing one and avoid the renaming?
+                  exists-param (gensym (str "e-" param-name))
+                  exists-ret (gensym "ret")
+                  c-mk (c-marker exists-param)
+                  ctx-var {:c-op :c-var
+                           :c-var-name ctx-var-name
+                           :c-typ {:t-op :t-exists
+                                   :t-var-name exists-param}}
+                  [ctx-l ctx-r]
+                  , (-> (typecheck (ctx-concat ctx [c-mk
+                                                    (c-exists exists-param)
+                                                    (c-exists exists-ret)
+                                                    ctx-var])
+                                   (rename-var ctx-var-name param-name (:body (first (:methods expr))))
+                                   {:t-op :t-exists
+                                    :t-var-name exists-ret})
+                        (ctx-break ctx-mk))
+                  ctx' (ctx-apply ctx-r {:t-op :t-fn
+                                         :t-param {:t-op :t-exists
+                                                   :t-var-name exists-param}
+                                         :t-ret {:t-op :t-exists
+                                                 :t-var-name exists-ret}})
+                  evars (unsolved ctx-r) ;; I think this is for a big multi-var forall?
+                  freshes (repeatedly (count evars) #(gensym "freshes"))
+                  (reduce (fn [t f] {:t-op :t-forall
+                                     :t-var-name f
+                                     :t-ret t})
+                          (reduce (fn [c [[f ev]]]
+                                    (type-substitute :TODO-???))
+                                  ctx' (map vector freshes evars))
+                          freshes)
+                  {:type :TODO
+                   :ctx ctx-l}]
+              ))))
 
 (declare instantiate-r)
 (defn instantiate-l
@@ -236,10 +279,8 @@
                         (:t-param typ))]
               (instantiate-r ctx' (type-apply ctx' (:t-ret typ)) ret'))
       :t-forall (let [var-name' (gensym) ; This one is the difference! it flips the forall to an existential!.
-                      ctx-marker {:c-op :c-marker
-                                  :c-var-name var-name'}
-                      ctx-elem {:c-op :c-exists
-                                :c-var-name var-name'}]
+                      ctx-marker (c-marker var-name')
+                      ctx-elem (c-exists-solved var-name')]
                   (-> (instantiate-r (ctx-concat ctx [ctx-marker ctx-elem]) ; Why wasn't this a ctx-conj? added to the other end?
                                      (type-substitute {:t-op :t-exists ; and replacing with an exists here instead of forall.
                                                        :t-var-name var-name'}
