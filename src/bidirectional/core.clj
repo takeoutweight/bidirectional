@@ -35,6 +35,7 @@
   (throw (Exception. "TODO")))
 
 (defn ctx-apply
+  "resolves type variables to monotypes, if they are solved."
   [ctx typ]
   (throw (Exception. "TODO")))
 
@@ -84,12 +85,6 @@
   [c-var-name typ]
   {:c-op :c-exists-solved :c-var-name c-var-name :c-typ typ})
 
-(defn ordered?
-  "b occurs after a in ctx"
-  [ctx t-var-name-a t-var-name-b]
-  (let [ctx-l (ctx-drop ctx (c-exists t-var-name-b))]
-    (contains? (existentials ctx-l) t-var-name-a)))
-
 (defn monotype?
   [typ]
   (throw (Exception. "TODO")))
@@ -111,6 +106,12 @@
 (defn free-t-vars
   [ctx]
   (throw (Exception. "TODO")))
+
+(defn ordered?
+  "b occurs after a in ctx"
+  [ctx t-var-name-a t-var-name-b]
+  (let [ctx-l (ctx-drop ctx (c-exists t-var-name-b))]
+    (contains? (existentials ctx-l) t-var-name-a)))
 
 (def sample-env
   (assoc (taj/empty-env)
@@ -152,7 +153,7 @@
               (update-in typ [:t-param] #(type-substitute new-typ t-var-name %))
               (update-in typ [:t-ret] #(type-substitute new-typ t-var-name %)))))
 
-(declare subtype typesynth)
+(declare subtype typesynth typeappysynth)
 
 (defn typecheck [ctx expr typ]
   (case (:op expr) ;; TODO Need to dispatch on expor on some (eg, is with-meta even checked at all? or synthed?) and typ on most?
@@ -199,24 +200,58 @@
                                    (rename-var ctx-var-name param-name (:body (first (:methods expr))))
                                    {:t-op :t-exists
                                     :t-var-name exists-ret})
-                        (ctx-break ctx-mk))
-                  ctx' (ctx-apply ctx-r {:t-op :t-fn
-                                         :t-param {:t-op :t-exists
-                                                   :t-var-name exists-param}
-                                         :t-ret {:t-op :t-exists
-                                                 :t-var-name exists-ret}})
-                  evars (unsolved ctx-r) ;; I think this is for a big multi-var forall?
+                        (ctx-break c-mk))
+                  typ (ctx-apply ctx-r {:t-op :t-fn
+                                        :t-param {:t-op :t-exists
+                                                  :t-var-name exists-param}
+                                        :t-ret {:t-op :t-exists
+                                                :t-var-name exists-ret}})
+                  evars (unsolved ctx-r) ;; I think this is becomes a big multi-var forall?
                   freshes (repeatedly (count evars) #(gensym "freshes"))
-                  (reduce (fn [t f] {:t-op :t-forall
-                                     :t-var-name f
-                                     :t-ret t})
-                          (reduce (fn [c [[f ev]]]
-                                    (type-substitute :TODO-???))
-                                  ctx' (map vector freshes evars))
-                          freshes)
-                  {:type :TODO
-                   :ctx ctx-l}]
-              ))))
+                  typ' (reduce (fn [t [f ev]]
+                                 (type-substitute {:to-op :t-var :t-var-name f} ev typ))
+                               typ
+                               (map vector freshes evars))
+                  typ'' (reduce (fn [t f] {:t-op :t-forall
+                                           :t-var-name f
+                                           :t-ret t})
+                                typ'
+                                freshes)]
+              {:type typ''
+               :ctx ctx-l}))
+    :invoke (let [{typ :type ctx' :ctx} (typesynth ctx (:TODOfn expr))]
+              (typeapplysynth typ (ctx-apply ctx' typ) (:TODOarg expr)))))
+
+(defn typeapplysynth
+  "type checks the actual argument of an invocation, given the type of the function."
+  [ctx typ expr]
+  (case (:t-op typ)
+    :t-forall (let [g (gensym "invokeforall")]
+                (typeapplysynth (ctx-conj ctx {:c-op :c-exists :c-var-name g})
+                                (type-substitute {:t-op :t-exists :t-var-name g}
+                                                 (:t-var-name typ)
+                                                 (:t-ret typ))
+                                expr))
+    :t-exists (let [garg (gensym "invoke-exarg") ;; refining our knowledge of an existential variable
+                    gret (gensym "invoke-gret")
+                    [ctx-l ctx-r] (ctx-break ctx {:c-op :c-exists :c-var-name (:t-var-name typ)})
+                    ctx' (typecheck (ctx-concat ctx-l
+                                                [{:c-op :c-exists :c-var-name garg}
+                                                 {:c-op :c-exists :c-var-name gret}
+                                                 {:c-op :c-exists-solved
+                                                  :c-var-name (:t-var-name typ)
+                                                  :c-typ {:t-op :t-fn
+                                                          :t-param {:t-op :t-exists :t-var-name garg}
+                                                          :t-ret {:t-op :t-exists :t-var-name gret}}}]
+                                                ctx-r)
+                                    expr
+                                    {:t-op :t-exists :t-var-name garg})]
+                {:type {:t-op :t-exists :t-var-name gret}
+                 :ctx ctx'})
+    :t-fn (let [ctx' (typecheck ctx expr (:t-param typ))]
+            {:type (:t-ret typ)
+             :ctx ctx'})
+    (throw (ex-info "Can't check this invoke" {:ctx ctx :typ typ :expr expr}))))
 
 (declare instantiate-r)
 (defn instantiate-l
@@ -292,12 +327,13 @@
 (defn subtype
   "typ1 < typ2"
   [ctx typ1 typ2]
-  (case [(:t-op typ1) (:t-op typ2)]
-    [:t-var :t-var]
-    [:t-fn :t-fn]
-    [:t-exists :t-exists]
-    (if (and (= :t-exists (:t-op typ1))
-             (contains? (existentials ctx) (:t-var-name typ1))
-             (not (contains? (free-t-vars typ2) (:t-var-name typ1))))
-      (instantiate-l ))
-    ))
+  (let [err (fn [msg] (throw (ex-info msg {:v1 typ1 :v2 typ2})))]
+    (case [(:t-op typ1) (:t-op typ2)]
+      [:t-var :t-var] (if (= (:t-var-name typ1) (:t-var-name typ1)) ctx (err "Vars don't match"))
+      [:t-fn :t-fn]
+      [:t-exists :t-exists]
+      (if (and (= :t-exists (:t-op typ1))
+               (contains? (existentials ctx) (:t-var-name typ1))
+               (not (contains? (free-t-vars typ2) (:t-var-name typ1))))
+        (instantiate-l ))
+      )))
