@@ -32,7 +32,10 @@
 (defn ctx-break
   "returns [ctx-left ctx-right]"
   [ctx ctx-elem]
-  (throw (Exception. "TODO")))
+  (let [idx (ffirst (filter (fn [[i e]] (if (= e ctx-elem) i nil)) (map-indexed vector ctx)))]
+    (if (nil? idx) (throw (ex-info "Can't find element to break" {:ctx ctx :ctx-elem ctx-elem}))
+        [(subvec ctx 0 idx)
+         (subvec ctx (inc idx) (count ctx))])))
 
 (defn ctx-apply
   "resolves type variables to monotypes, if they are solved."
