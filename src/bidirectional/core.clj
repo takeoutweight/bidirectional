@@ -39,9 +39,18 @@
   [ctx typ]
   (throw (Exception. "TODO")))
 
-(defn type-wf
+(defn type-wf ;; cf typewf Contex.hs
+  "returns a boolean"
   [ctx typ]
-  (throw (Exception. "TODO")))
+  (case (:t-op typ)
+    :t-var (contains? (into #{} (map :c-var-name (filter #(= :c-forall (:c-op %)) ctx)))
+                      (:t-var-name typ))
+    :t-fn (and (type-wf ctx (:t-param typ))
+               (type-wf ctx (:t-param typ)))
+    :t-forall (type-wf (ctx-conj ctx {:c-op :c-forall :c-var-name (:t-var-name typ)})
+                       (:t-ret typ))
+    :t-exists (contains? (into #{} (map :c-var-name (filter #(= :c-forall (:c-op %)) ctx)))
+                         (:t-var-name typ))))
 
 (defn find-solved
   "returns nil or the solved monotype"
@@ -113,10 +122,6 @@
   (let [ctx-l (ctx-drop ctx (c-exists t-var-name-b))]
     (contains? (existentials ctx-l) t-var-name-a)))
 
-(def sample-env
-  (assoc (taj/empty-env)
-         :locals {'fun1 (taem/elide-meta (taj/analyze+eval '(fn [x] x) (taj/empty-env)))}))
-
 (defn rename-var
   "a la substitution: [new-name / for-name]expr
   This assumes analysis has already freshly renamed all variables.
@@ -153,10 +158,10 @@
               (update-in typ [:t-param] #(type-substitute new-typ t-var-name %))
               (update-in typ [:t-ret] #(type-substitute new-typ t-var-name %)))))
 
-(declare subtype typesynth typeappysynth)
+(declare subtype typesynth typeapplysynth)
 
 (defn typecheck [ctx expr typ]
-  (case (:op expr) ;; TODO Need to dispatch on expor on some (eg, is with-meta even checked at all? or synthed?) and typ on most?
+  (case (:op expr)
     :with-meta (typecheck ctx (:expr expr) typ)
     :do (typecheck ctx (:ret expr) typ) ;; TODO synthesize non-return statements of a do? is do even checked?
     :fn (do (assert (= :t-fn (:t-op typ)) "type isn't fn type")
@@ -179,6 +184,7 @@
   "returns {:type t :ctx c}"
   [ctx expr]
   (case (:op expr)
+    :var :TODO                          ; i.e. calling a named fn - synth vs check? both probably.
     :with-meta (typesynth ctx (:expr expr))
     :annotation {:type (:type expr) :ctx (typecheck ctx (:expr expr) (:type expr))} ; TODO This doesn't exist in source
     :fn (do (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
@@ -219,13 +225,15 @@
                                 freshes)]
               {:type typ''
                :ctx ctx-l}))
-    :invoke (let [{typ :type ctx' :ctx} (typesynth ctx (:TODOfn expr))]
-              (typeapplysynth typ (ctx-apply ctx' typ) (:TODOarg expr)))))
+    :invoke (let [{typ :type ctx' :ctx} (typesynth ctx (:fn expr))]
+              (assert (= 1 (count (:args expr))) "only supports single arguments right now")
+              (typeapplysynth typ (ctx-apply ctx' typ) (first (:args expr))))))
 
 (defn typeapplysynth
   "type checks the actual argument of an invocation, given the type of the function."
   [ctx typ expr]
   (case (:t-op typ)
+    :with-meta (typeapplysynth ctx typ (:expr expr)) ;; TODO: should we normalize these away somehow? embed their meta into their :expr probably.
     :t-forall (let [g (gensym "invokeforall")]
                 (typeapplysynth (ctx-conj ctx {:c-op :c-exists :c-var-name g})
                                 (type-substitute {:t-op :t-exists :t-var-name g}
@@ -295,7 +303,7 @@
   (if-let [ctx' {:solved (and (monotype? typ) ; same as before
                               (solve ctx t-var-name typ))}]
     ctx'
-    (case (:t-op typ)                   ; TODO some checkwftypes of return
+    (case (:t-op typ)
       :t-exists (if (ordered? ctx t-var-name (:t-var-name typ)) ; same
                   (:solved (solve ctx (:t-var-name typ) (c-exists t-var-name)))
                   (do (prn "NOTE: Weird case hit:") (:solved (solve ctx t-var-name typ))))
@@ -337,3 +345,11 @@
                (not (contains? (free-t-vars typ2) (:t-var-name typ1))))
         (instantiate-l ))
       )))
+
+;;;;;;;;; Scratch ;;;;;;;;;
+
+(def sample-env
+  (assoc (taj/empty-env)
+         :locals {'fun1 (taem/elide-meta (taj/analyze+eval '(fn [x] x) (taj/empty-env)))}))
+
+#_(taj/analyze+eval '(+ 1 2) (taj/empty-env))
