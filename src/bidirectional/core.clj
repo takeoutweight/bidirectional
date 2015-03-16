@@ -63,10 +63,9 @@
 (defn find-solved
   "returns nil or the solved monotype"
   [ctx var-name]
-  (first (filter (fn [c-elem] (and (= :c-exists-solved (:c-op c-elem))
-                                   (= var-name (:c-var-name c-elem))
-                                   (:c-typ c-elem)))
-                 ctx)))
+  (:c-typ (first (filter (fn [c-elem] (and (= :c-exists-solved (:c-op c-elem))
+                                           (= var-name (:c-var-name c-elem))))
+                         ctx))))
 
 (defn unsolved
   "returns set of unsolved existentials"
@@ -85,7 +84,8 @@
     :t-exists (if-let [typ' (find-solved ctx (:t-var-name typ))]
                 (type-apply ctx typ')
                 typ)
-    :t-var typ))
+    :t-var typ
+    (throw (ex-info "Can't type apply" {:ctx ctx :type typ}))))
 
 (defn c-marker
   "constructor"
@@ -109,13 +109,14 @@
     :t-exists true
     :t-forall false
     :t-fn (and (monotype? (:t-param typ))
-               (monotype? (:t-ret typ)))))
+               (monotype? (:t-ret typ)))
+    (throw (ex-info "can't monotype" {:type typ}))))
 
 (defn solve
   "this seems nedlessly complex if it's just a wf check?"
   [ctx t-var-name typ]
   (assert (monotype? typ) "Can only solve for monotypes -- forgot a guard?")
-  (let [[ctx-l ctx-r] (ctx-break {:c-op :c-exists :c-var-name t-var-name} ctx)]
+  (let [[ctx-l ctx-r] (ctx-break ctx {:c-op :c-exists :c-var-name t-var-name})]
     (if (type-wf ctx-l typ) ;; Q: What does this check represent?
       {:solved  (ctx-concat ctx-l [(c-exists-solved t-var-name typ)] ctx-r)}
       {:unsolved true})))
@@ -141,6 +142,7 @@
   This assumes analysis has already freshly renamed all variables.
   for-name is the actual symbol name to rebind (not the analyzed local var form)"
   [new-name for-name expr]
+  (prn "rename-var" [new-name for-name expr])
   (case (:op expr)
     :with-meta (update-in expr [:expr] #(rename-var new-name for-name %))
     :do (-> (<<- (update-in expr [:statements]) (fn [ss])
@@ -162,6 +164,7 @@
 (defn type-substitute
   "sub new-typ for t-var-name in typ"
   [new-typ t-var-name typ]
+  (prn "type-substitute" [new-typ t-var-name typ])
   (case (:t-op typ)
     :t-var (if (= t-var-name (:t-var-name typ)) new-typ typ)
     :t-exists (if (= t-var-name (:t-var-name typ)) new-typ typ)
@@ -169,12 +172,13 @@
                 (do (println "Should this ever happen with hygenic vars??") typ)
                 (update-in typ [:t-ret] #(type-substitute new-typ t-var-name %)))
     :t-fn (-> typ
-              (update-in typ [:t-param] #(type-substitute new-typ t-var-name %))
-              (update-in typ [:t-ret] #(type-substitute new-typ t-var-name %)))))
+              (update-in [:t-param] #(type-substitute new-typ t-var-name %))
+              (update-in [:t-ret] #(type-substitute new-typ t-var-name %)))))
 
 (declare subtype typesynth typeapplysynth)
 
 (defn typecheck [ctx expr typ]
+  (prn "typecheck" [ctx expr typ])
   (case (:op expr)
     :with-meta (typecheck ctx (:expr expr) typ)
     :do (typecheck ctx (:ret expr) typ)
@@ -191,14 +195,16 @@
                              (:t-ret typ))
                   (ctx-drop ctx-elem))))
     (let [{typ' :type ctx' :ctx} (typesynth ctx expr)]
+      (prn "synthed: " {:type typ' :ctx ctx'})
       (subtype ctx' (type-apply ctx' typ') (type-apply ctx' typ)))))
 
 (defn typesynth
   "returns {:type t :ctx c}"
   [ctx expr]
+  (prn "typesynth" [ctx expr])
   (case (:op expr)
-    :local (if-let [typ (find-var-type ctx (:form expr))] ;; (fn and let vars are both :local) - those bound by the env are inlined it seems? (why would these be and not let-bounds vars?
-             {:type type :ctx ctx}
+    :local (if-let [typ (find-var-type ctx (:name expr))] ;; (fn and let vars are both :local) - those bound by the env are inlined it seems? (why would these be and not let-bounds vars?
+             {:type typ :ctx ctx}
              (throw (ex-info "var not found in context" {:ctx ctx :expr expr})))
     :with-meta (typesynth ctx (:expr expr))
     :annotation {:type (:type expr) :ctx (typecheck ctx (:expr expr) (:type expr))}
@@ -280,12 +286,13 @@
 (defn instantiate-l
   "returns a context"
   [ctx t-var-name typ]
-  (if-let [ctx' {:solved (and (monotype? typ)
-                              (solve ctx t-var-name typ))}]
+  (if-let [ctx' (:solved (and (monotype? typ)
+                              (solve ctx t-var-name typ)))]
     ctx'
     (case (:t-op typ)
       :t-exists (if (ordered? ctx t-var-name (:t-var-name typ)) ;; I guess this has to succeed? This seems to just be careful control over the ctx order.
-                  (:solved (solve ctx (:t-var-name typ) (c-exists t-var-name)))
+                  (:solved (solve ctx (:t-var-name typ) {:t-op :t-exists
+                                                         :t-var-name t-var-name}))
                   (do (prn "NOTE: Weird case hit:") (:solved (solve ctx t-var-name typ)))) ;; Q: How would get to this case? Wouldn't it be hit in the "if" above?!
       :t-fn (let [param' (gensym)
                   ret' (gensym)
@@ -315,12 +322,13 @@
 (defn instantiate-r
   "Q: Why are the args flipped from instantiate-l on this one? is that important?"
   [ctx typ t-var-name]
-  (if-let [ctx' {:solved (and (monotype? typ) ; same as before
-                              (solve ctx t-var-name typ))}]
+  (if-let [ctx' (:solved (and (monotype? typ) ; same as before
+                              (solve ctx t-var-name typ)))]
     ctx'
     (case (:t-op typ)
       :t-exists (if (ordered? ctx t-var-name (:t-var-name typ)) ; same
-                  (:solved (solve ctx (:t-var-name typ) (c-exists t-var-name)))
+                  (:solved (solve ctx (:t-var-name typ) {:t-op :t-exists
+                                                         :t-var-name t-var-name}))
                   (do (prn "NOTE: Weird case hit:") (:solved (solve ctx t-var-name typ))))
       :t-fn (let [param' (gensym)
                   ret' (gensym)
@@ -350,6 +358,7 @@
 (defn subtype
   "typ1 < typ2 - returns a new context"
   [ctx typ1 typ2]
+  (prn "subtype" [ctx typ1 typ2])
   (let [err (fn [msg] (throw (ex-info msg {:v1 typ1 :v2 typ2})))]
     (case [(:t-op typ1) (:t-op typ2)]
       [:t-var :t-var] (if (= (:t-var-name typ1) (:t-var-name typ1)) ctx (err "Vars don't match"))
@@ -397,3 +406,6 @@
          :locals {'fun1 (taem/elide-meta (taj/analyze+eval '(fn [x] x) (taj/empty-env)))}))
 
 #_(taj/analyze+eval '(+ 1 2) (taj/empty-env))
+
+;;; FIXME: var not found in ctx - :name and :form are different.
+#_(typesynth [] (taj/analyze+eval '(fn [x] x) (taj/empty-env)))
