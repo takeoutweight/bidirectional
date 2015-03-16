@@ -37,6 +37,11 @@
   [ctx ctx-elem]
   (first (ctx-break ctx ctx-elem)))
 
+(defn find-var-type ;; Context.hs
+  "Looks up a var in context - returns its type or nil"
+  [ctx var-name]
+  (:c-typ (first (filter (fn [e] (= (:c-var-name e) var-name)) ctx))))
+
 (defn existentials
   "returns a set of the existential var names"
   [ctx]
@@ -172,7 +177,7 @@
 (defn typecheck [ctx expr typ]
   (case (:op expr)
     :with-meta (typecheck ctx (:expr expr) typ)
-    :do (typecheck ctx (:ret expr) typ) ;; TODO synthesize non-return statements of a do? is do even checked?
+    :do (typecheck ctx (:ret expr) typ)
     :fn (do (assert (= :t-fn (:t-op typ)) "type isn't fn type")
             (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
             (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
@@ -185,7 +190,6 @@
                              (rename-var ctx-var-name param-name (:body (first (:methods expr))))
                              (:t-ret typ))
                   (ctx-drop ctx-elem))))
-    ;; subtype - TODO: does this "else" work for us, even though we have a bigger :op space?
     (let [{typ' :type ctx' :ctx} (typesynth ctx expr)]
       (subtype ctx' (type-apply ctx' typ') (type-apply ctx' typ)))))
 
@@ -193,9 +197,11 @@
   "returns {:type t :ctx c}"
   [ctx expr]
   (case (:op expr)
-    :var :TODO                          ; i.e. calling a named fn - synth vs check? both probably.
+    :local (if-let [typ (find-var-type ctx (:form expr))] ;; (fn and let vars are both :local) - those bound by the env are inlined it seems? (why would these be and not let-bounds vars?
+             {:type type :ctx ctx}
+             (throw (ex-info "var not found in context" {:ctx ctx :expr expr})))
     :with-meta (typesynth ctx (:expr expr))
-    :annotation {:type (:type expr) :ctx (typecheck ctx (:expr expr) (:type expr))} ; TODO This doesn't exist in source
+    :annotation {:type (:type expr) :ctx (typecheck ctx (:expr expr) (:type expr))}
     :fn (do (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
             (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
             (let [param-name (:name (first (:params (first (:methods expr)))))
@@ -217,10 +223,10 @@
                                     :t-var-name exists-ret})
                         (ctx-break c-mk))
                   typ (type-apply ctx-r {:t-op :t-fn
-                                        :t-param {:t-op :t-exists
-                                                  :t-var-name exists-param}
-                                        :t-ret {:t-op :t-exists
-                                                :t-var-name exists-ret}})
+                                         :t-param {:t-op :t-exists
+                                                   :t-var-name exists-param}
+                                         :t-ret {:t-op :t-exists
+                                                 :t-var-name exists-ret}})
                   evars (unsolved ctx-r) ;; I think this is becomes a big multi-var forall?
                   freshes (repeatedly (count evars) #(gensym "freshes"))
                   typ' (reduce (fn [t [f ev]]
@@ -242,7 +248,7 @@
   "type checks the actual argument of an invocation, given the type of the function."
   [ctx typ expr]
   (case (:t-op typ)
-    :with-meta (typeapplysynth ctx typ (:expr expr)) ;; TODO: should we normalize these away somehow? embed their meta into their :expr probably.
+    :with-meta (typeapplysynth ctx typ (:expr expr))
     :t-forall (let [g (gensym "invokeforall")]
                 (typeapplysynth (ctx-conj ctx {:c-op :c-exists :c-var-name g})
                                 (type-substitute {:t-op :t-exists :t-var-name g}
