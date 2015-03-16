@@ -1,5 +1,6 @@
 (ns bidirectional.core
   (:require [clojure.tools.analyzer :as ta]
+            [clojure.set :as set]
             [clojure.tools.analyzer.passes.elide-meta :as taem]
             [clojure.tools.analyzer.jvm :as taj]
             [clojure.jvm.tools.analyzer.emit-form :as tae]
@@ -20,14 +21,8 @@
   (conj ctx ctx-elem))
 
 (defn ctx-concat
-  "TODO: Not sure this is right - if vecs and contexts can be interchangeable like this."
   [& ctxs]
   (vec (apply concat ctxs)))
-
-(defn ctx-drop
-  "I think this drops everything to the right of elem, including elem."
-  [ctx ctx-elem]
-  (throw (Exception. "TODO")))
 
 (defn ctx-break
   "returns [ctx-left ctx-right]"
@@ -37,10 +32,15 @@
         [(subvec ctx 0 idx)
          (subvec ctx (inc idx) (count ctx))])))
 
-(defn ctx-apply
-  "resolves type variables to monotypes, if they are solved."
-  [ctx typ]
-  (throw (Exception. "TODO")))
+(defn ctx-drop
+  "I think this drops everything to the right of elem, including elem."
+  [ctx ctx-elem]
+  (first (ctx-break ctx ctx-elem)))
+
+(defn existentials
+  "returns a set of the existential var names"
+  [ctx]
+  (into #{} (map :c-var-name (filter #(#{:c-exists :c-exists-solved} (:c-op %)) ctx))))
 
 (defn type-wf ;; cf typewf Contex.hs
   "returns a boolean"
@@ -52,7 +52,7 @@
                (type-wf ctx (:t-param typ)))
     :t-forall (type-wf (ctx-conj ctx {:c-op :c-forall :c-var-name (:t-var-name typ)})
                        (:t-ret typ))
-    :t-exists (contains? (into #{} (map :c-var-name (filter #(= :c-forall (:c-op %)) ctx)))
+    :t-exists (contains? (existentials ctx)
                          (:t-var-name typ))))
 
 (defn find-solved
@@ -64,12 +64,12 @@
                  ctx)))
 
 (defn unsolved
-  "returns unsolved existentials?"
+  "returns set of unsolved existentials"
   [ctx]
-  (throw (Exception. "TODO")))
+  (into #{} (filter #(#{:c-exists} (:c-op %)) ctx)))
 
-(defn type-apply
-  "??? Maybe looks up a type with the solved existentals replaced with what they're solved with?
+(defn type-apply ; apply Context.hs
+  "looks up a type with the solved existentals replaced with what they're solved with?
    takes a type and returns a type."
   [ctx typ]
   (case (:t-op typ)
@@ -80,7 +80,7 @@
     :t-exists (if-let [typ' (find-solved ctx (:t-var-name typ))]
                 (type-apply ctx typ')
                 typ)
-    typ))
+    :t-var typ))
 
 (defn c-marker
   "constructor"
@@ -99,10 +99,15 @@
 
 (defn monotype?
   [typ]
-  (throw (Exception. "TODO")))
+  (case (:t-op typ)
+    :t-var true
+    :t-exists true
+    :t-forall false
+    :t-fn (and (monotype? (:t-param typ))
+               (monotype? (:t-ret typ)))))
 
 (defn solve
-  "TODO: this seems nedlessly complex if it's just a wf check?"
+  "this seems nedlessly complex if it's just a wf check?"
   [ctx t-var-name typ]
   (assert (monotype? typ) "Can only solve for monotypes -- forgot a guard?")
   (let [[ctx-l ctx-r] (ctx-break {:c-op :c-exists :c-var-name t-var-name} ctx)]
@@ -110,14 +115,15 @@
       {:solved  (ctx-concat ctx-l [(c-exists-solved t-var-name typ)] ctx-r)}
       {:unsolved true})))
 
-(defn existentials
-  "returns a set of the existential var names"
-  [ctx]
-  (throw (Exception. "TODO")))
-
 (defn free-t-vars
-  [ctx]
-  (throw (Exception. "TODO")))
+  "returns the set of t-var-names that are free"
+  [typ]
+  (case (:t-op typ)
+    :t-var #{(:t-var-name typ)}
+    :t-exists #{(:t-var-name typ)}
+    :t-forall (set/difference (free-t-vars (:t-ret typ)) #{(:t-var-name typ)})
+    :t-fn (set/union (free-t-vars (:t-param typ))
+                     (free-t-vars (:t-ret typ)))))
 
 (defn ordered?
   "b occurs after a in ctx"
@@ -181,7 +187,7 @@
                   (ctx-drop ctx-elem))))
     ;; subtype - TODO: does this "else" work for us, even though we have a bigger :op space?
     (let [{typ' :type ctx' :ctx} (typesynth ctx expr)]
-      (subtype ctx' (ctx-apply ctx' typ') (ctx-apply ctx' typ)))))
+      (subtype ctx' (type-apply ctx' typ') (type-apply ctx' typ)))))
 
 (defn typesynth
   "returns {:type t :ctx c}"
@@ -210,7 +216,7 @@
                                    {:t-op :t-exists
                                     :t-var-name exists-ret})
                         (ctx-break c-mk))
-                  typ (ctx-apply ctx-r {:t-op :t-fn
+                  typ (type-apply ctx-r {:t-op :t-fn
                                         :t-param {:t-op :t-exists
                                                   :t-var-name exists-param}
                                         :t-ret {:t-op :t-exists
@@ -218,7 +224,7 @@
                   evars (unsolved ctx-r) ;; I think this is becomes a big multi-var forall?
                   freshes (repeatedly (count evars) #(gensym "freshes"))
                   typ' (reduce (fn [t [f ev]]
-                                 (type-substitute {:to-op :t-var :t-var-name f} ev typ))
+                                 (type-substitute {:to-op :t-var :t-var-name f} (:c-var-name ev) typ))
                                typ
                                (map vector freshes evars))
                   typ'' (reduce (fn [t f] {:t-op :t-forall
@@ -230,7 +236,7 @@
                :ctx ctx-l}))
     :invoke (let [{typ :type ctx' :ctx} (typesynth ctx (:fn expr))]
               (assert (= 1 (count (:args expr))) "only supports single arguments right now")
-              (typeapplysynth typ (ctx-apply ctx' typ) (first (:args expr))))))
+              (typeapplysynth typ (type-apply ctx' typ) (first (:args expr))))))
 
 (defn typeapplysynth
   "type checks the actual argument of an invocation, given the type of the function."
@@ -336,18 +342,47 @@
                       (ctx-drop ctx-marker))))))
 
 (defn subtype
-  "typ1 < typ2"
+  "typ1 < typ2 - returns a new context"
   [ctx typ1 typ2]
   (let [err (fn [msg] (throw (ex-info msg {:v1 typ1 :v2 typ2})))]
     (case [(:t-op typ1) (:t-op typ2)]
       [:t-var :t-var] (if (= (:t-var-name typ1) (:t-var-name typ1)) ctx (err "Vars don't match"))
-      [:t-fn :t-fn]
-      [:t-exists :t-exists]
-      (if (and (= :t-exists (:t-op typ1))
-               (contains? (existentials ctx) (:t-var-name typ1))
-               (not (contains? (free-t-vars typ2) (:t-var-name typ1))))
-        (instantiate-l ))
-      )))
+      [:t-fn :t-fn] (let [ctx' (subtype ctx (:t-param typ2) (:t-param typ1))] ; Note polarity swap!
+                      (subtype ctx' (type-apply ctx' (:t-ret typ1) (:t-ret typ2))))
+      (cond
+        (= :t-forall (:t-op typ2)) (let [var-name' (gensym "subtype-r")
+                                         ctx-elem {:c-op :c-forall
+                                                   :c-var-name var-name'}]
+                                     (-> (subtype (ctx-concat ctx [ctx-elem])
+                                                  typ1
+                                                  (type-substitute {:t-op :t-var
+                                                                    :t-var-name var-name'}
+                                                                   (:t-var-name typ2)
+                                                                   (:t-ret typ2)))
+                                         (ctx-drop ctx-elem)))
+        (= :t-forall (:t-op typ1)) (let [var-name' (gensym "subtype-l")]
+                                     (-> (subtype (ctx-concat ctx [(c-marker var-name')
+                                                                   {:c-op :c-exists
+                                                                    :c-var-name var-name'}])
+                                                  (type-substitute {:t-op :t-exists
+                                                                    :t-var-name var-name'}
+                                                                   (:t-var-name typ1)
+                                                                   (:t-ret typ1))
+                                                  typ2)
+                                         (ctx-drop (c-marker var-name'))))
+        (and (= :t-exists (:t-op typ1))
+             (= :t-exists (:t-op typ2))
+             (= (:t-var-name typ1) (:t-var-name typ2))
+             (contains? (existentials ctx) (:t-var-name typ1)))
+        , ctx
+        (and (= :t-exists (:t-op typ1))
+             (contains? (existentials ctx) (:t-var-name typ1))
+             (not (contains? (free-t-vars typ2) (:t-var-name typ1))))
+        , (instantiate-l ctx (:t-var-name typ1) typ2)
+        (and (= :t-exists (:t-op typ2))
+             (contains? (existentials ctx) (:t-var-name typ2))
+             (not (contains? (free-t-vars typ1) (:t-var-name typ2))))
+        , (instantiate-r ctx typ1 (:t-var-name typ2))))))
 
 ;;;;;;;;; Scratch ;;;;;;;;;
 
