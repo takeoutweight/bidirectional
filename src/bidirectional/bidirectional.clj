@@ -1,4 +1,4 @@
-(ns bidirectional.core
+(ns bidirectional.bidirectional
   (:require [clojure.tools.analyzer :as ta]
             [clojure.set :as set]
             [clojure.tools.analyzer.passes.elide-meta :as taem]
