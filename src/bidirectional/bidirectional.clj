@@ -1,6 +1,8 @@
 (ns bidirectional.bidirectional
   (:require [clojure.tools.analyzer :as ta]
             [clojure.set :as set]
+            [clojure.string :as str]
+            [clojure.test :refer :all]
             [clojure.tools.analyzer.passes.elide-meta :as taem]
             [clojure.tools.analyzer.jvm :as taj]
             [clojure.jvm.tools.analyzer.emit-form :as tae]
@@ -86,6 +88,36 @@
                 typ)
     :t-var typ
     (throw (ex-info "Can't type apply" {:ctx ctx :type typ}))))
+
+(defn renumber-varnames
+  "renames gensyms to something stable. Recognizes gensyms via regex so just clips off post-fix number"
+  [typ]
+  (let [env (atom {})] ;; exists can add names anywhere.
+    (letfn [(fresh [typ]
+              (let [old-name (:t-var-name typ)
+                    new-base (subs (str old-name) 0 (- (count (str old-name))
+                                                       (count (re-find #"[0-9_]*" (str/reverse (str old-name))))))
+                    new-renames (into #{} (vals @env))
+                    new-name (symbol (first (remove #(contains? new-renames %)
+                                                    (cons new-base (for [i (drop 1 (range))] (str new-base "_" i))))))]
+                (swap! env assoc old-name new-name)
+                new-name))
+            (renumber
+              [typ]
+              (case (:t-op typ)
+                :t-forall
+                (-> typ
+                    (assoc-in [:t-var-name] (fresh typ))
+                    (update-in [:t-ret] #(renumber %)))
+                :t-fn (-> typ
+                          (update-in [:t-param] #(renumber %))
+                          (update-in [:t-ret] #(renumber %)))
+                :t-exists (assoc-in typ [:t-var-name] (fresh typ))
+                :t-var (if-let [new-name (get @env (:t-var-name typ))]
+                         (assoc-in typ [:t-var-name] new-name)
+                         (throw (ex-info "No name provided for var " {:typ typ})))
+                (throw (ex-info "Can't rename " {:type typ :case (case (:t-op typ) :t-var true false)}))))]
+      (renumber typ))))
 
 (defn c-marker
   "constructor"
@@ -182,7 +214,7 @@
   (case (:op expr)
     :with-meta (typecheck ctx (:expr expr) typ)
     :do (typecheck ctx (:ret expr) typ)
-    :fn (do (assert (= :t-fn (:t-op typ)) "type isn't fn type")
+    :fn (do (assert (= :t-fn (:t-op typ)) (str "type isn't fn type " {:typ typ}))
             (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
             (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
             (let [param-name (:name (first (:params (first (:methods expr)))))
@@ -236,7 +268,7 @@
                   evars (unsolved ctx-r) ;; I think this is becomes a big multi-var forall?
                   freshes (repeatedly (count evars) #(gensym "freshes"))
                   typ' (reduce (fn [t [f ev]]
-                                 (type-substitute {:to-op :t-var :t-var-name f} (:c-var-name ev) typ))
+                                 (type-substitute {:t-op :t-var :t-var-name f} (:c-var-name ev) typ))
                                typ
                                (map vector freshes evars))
                   typ'' (reduce (fn [t f] {:t-op :t-forall
@@ -406,6 +438,3 @@
          :locals {'fun1 (taem/elide-meta (taj/analyze+eval '(fn [x] x) (taj/empty-env)))}))
 
 #_(taj/analyze+eval '(+ 1 2) (taj/empty-env))
-
-;;; FIXME: var not found in ctx - :name and :form are different.
-#_(typesynth [] (taj/analyze+eval '(fn [x] x) (taj/empty-env)))
