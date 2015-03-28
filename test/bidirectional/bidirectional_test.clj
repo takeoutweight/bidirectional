@@ -9,5 +9,5 @@
            :t-ret {:t-op :t-fn,
                    :t-param {:t-op :t-var, :t-var-name freshes},
                    :t-ret {:t-op :t-var, :t-var-name freshes}}}))
-  ;; FIXME - it's an existential type not a fn type. I screwed something up.
+  ;; FIXME - it's an existential type not a fn type. I screwed something up. It might also not be possible because it's too polymorphic? But how to get a nicer error message for that?
   (is (renumber-varnames (:type (typesynth [] (taj/analyze+eval '((fn [x] x) (fn [x] x)) (taj/empty-env)))))))

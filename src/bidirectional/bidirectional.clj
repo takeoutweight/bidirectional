@@ -196,39 +196,43 @@
 (defn type-substitute
   "sub new-typ for t-var-name in typ"
   [new-typ t-var-name typ]
-  (prn "type-substitute" [new-typ t-var-name typ])
-  (case (:t-op typ)
-    :t-var (if (= t-var-name (:t-var-name typ)) new-typ typ)
-    :t-exists (if (= t-var-name (:t-var-name typ)) new-typ typ)
-    :t-forall (if (= t-var-name (:t-var-name typ))
-                (do (println "Should this ever happen with hygenic vars??") typ)
-                (update-in typ [:t-ret] #(type-substitute new-typ t-var-name %)))
-    :t-fn (-> typ
-              (update-in [:t-param] #(type-substitute new-typ t-var-name %))
-              (update-in [:t-ret] #(type-substitute new-typ t-var-name %)))))
+  (let [r (case (:t-op typ)
+            :t-var (if (= t-var-name (:t-var-name typ)) new-typ typ)
+            :t-exists (if (= t-var-name (:t-var-name typ)) new-typ typ)
+            :t-forall (if (= t-var-name (:t-var-name typ))
+                        (do (println "Should this ever happen with hygenic vars??") typ)
+                        (update-in typ [:t-ret] #(type-substitute new-typ t-var-name %)))
+            :t-fn (-> typ
+                      (update-in [:t-param] #(type-substitute new-typ t-var-name %))
+                      (update-in [:t-ret] #(type-substitute new-typ t-var-name %))))]
+    (prn "type-substitute" [new-typ t-var-name typ "->" r])
+    r))
 
 (declare subtype typesynth typeapplysynth)
 
-(defn typecheck [ctx expr typ]
-  (prn "typecheck" [ctx expr typ])
-  (case (:op expr)
-    :with-meta (typecheck ctx (:expr expr) typ)
-    :do (typecheck ctx (:ret expr) typ)
-    :fn (do (assert (= :t-fn (:t-op typ)) (str "type isn't fn type " {:typ typ}))
-            (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
-            (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
-            (let [param-name (:name (first (:params (first (:methods expr)))))
-                  ctx-var-name (gensym param-name) ; Since param-name is gensymmed, I'm guessing we can just use the existing one and avoid the renaming?
-                  ctx-elem {:c-op :c-var
-                            :c-var-name ctx-var-name
-                            :c-typ (:t-param typ)}]
-              (-> (typecheck (ctx-conj ctx ctx-elem)
-                             (rename-var ctx-var-name param-name (:body (first (:methods expr))))
-                             (:t-ret typ))
-                  (ctx-drop ctx-elem))))
-    (let [{typ' :type ctx' :ctx} (typesynth ctx expr)]
-      (prn "synthed: " {:type typ' :ctx ctx'})
-      (subtype ctx' (type-apply ctx' typ') (type-apply ctx' typ)))))
+(defn typecheck
+  "returns updated ctx"
+  [ctx expr typ]
+  (let [r (case (:op expr)
+            :with-meta (typecheck ctx (:expr expr) typ)
+            :do (typecheck ctx (:ret expr) typ)
+            :fn (do (assert (= :t-fn (:t-op typ)) (str "type isn't fn type " {:typ typ}))
+                    (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
+                    (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
+                    (let [param-name (:name (first (:params (first (:methods expr)))))
+                          ctx-var-name (gensym param-name) ; Since param-name is gensymmed, I'm guessing we can just use the existing one and avoid the renaming?
+                          ctx-elem {:c-op :c-var
+                                    :c-var-name ctx-var-name
+                                    :c-typ (:t-param typ)}]
+                      (-> (typecheck (ctx-conj ctx ctx-elem)
+                                     (rename-var ctx-var-name param-name (:body (first (:methods expr))))
+                                     (:t-ret typ))
+                          (ctx-drop ctx-elem))))
+            (let [{typ' :type ctx' :ctx} (typesynth ctx expr)]
+              (prn "synthed: " {:type typ' :ctx ctx'})
+              (subtype ctx' (type-apply ctx' typ') (type-apply ctx' typ))))]
+    (prn "typecheck" [(:op expr) {:ctx ctx} expr typ "->" r])
+    r))
 
 (defn typesynth
   "returns {:type t :ctx c}"
