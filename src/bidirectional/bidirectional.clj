@@ -53,6 +53,7 @@
   "returns a boolean"
   [ctx typ]
   (case (:t-op typ)
+    :t-unit true
     :t-var (contains? (into #{} (map :c-var-name (filter #(= :c-forall (:c-op %)) ctx)))
                       (:t-var-name typ))
     :t-fn (and (type-wf ctx (:t-param typ))
@@ -79,6 +80,7 @@
    takes a type and returns a type."
   [ctx typ]
   (case (:t-op typ)
+    :t-unit typ
     :t-forall (update-in typ [:t-ret] #(type-apply ctx %))
     :t-fn (-> typ
               (update-in [:t-param] #(type-apply ctx %))
@@ -98,13 +100,17 @@
                     new-base (subs (str old-name) 0 (- (count (str old-name))
                                                        (count (re-find #"[0-9_]*" (str/reverse (str old-name))))))
                     new-renames (into #{} (vals @env))
-                    new-name (symbol (first (remove #(contains? new-renames %)
-                                                    (cons new-base (for [i (drop 1 (range))] (str new-base "_" i))))))]
+                    new-name (->> (for [i (drop 1 (range))] (str new-base "_" i))
+                                  (cons new-base)
+                                  (map symbol)
+                                  (remove #(contains? new-renames %))
+                                  (first))]
                 (swap! env assoc old-name new-name)
                 new-name))
             (renumber
               [typ]
               (case (:t-op typ)
+                :t-unit typ
                 :t-forall
                 (-> typ
                     (assoc-in [:t-var-name] (fresh typ))
@@ -137,6 +143,7 @@
 (defn monotype?
   [typ]
   (case (:t-op typ)
+    :t-unit true
     :t-var true
     :t-exists true
     :t-forall false
@@ -157,6 +164,7 @@
   "returns the set of t-var-names that are free"
   [typ]
   (case (:t-op typ)
+    :t-unit #{}
     :t-var #{(:t-var-name typ)}
     :t-exists #{(:t-var-name typ)}
     :t-forall (set/difference (free-t-vars (:t-ret typ)) #{(:t-var-name typ)})
@@ -176,6 +184,7 @@
   [new-name for-name expr]
   (prn "rename-var" [new-name for-name expr])
   (case (:op expr)
+    :const expr
     :with-meta (update-in expr [:expr] #(rename-var new-name for-name %))
     :do (-> (<<- (update-in expr [:statements]) (fn [ss])
                  (vec) (for [s ss])
@@ -197,6 +206,7 @@
   "sub new-typ for t-var-name in typ"
   [new-typ t-var-name typ]
   (let [r (case (:t-op typ)
+            :t-unit typ
             :t-var (if (= t-var-name (:t-var-name typ)) new-typ typ)
             :t-exists (if (= t-var-name (:t-var-name typ)) new-typ typ)
             :t-forall (if (= t-var-name (:t-var-name typ))
@@ -213,32 +223,50 @@
 (defn typecheck
   "returns updated ctx"
   [ctx expr typ]
-  (let [r (case (:op expr)
-            :with-meta (typecheck ctx (:expr expr) typ)
-            :do (typecheck ctx (:ret expr) typ)
-            :fn (do (assert (= :t-fn (:t-op typ)) (str "type isn't fn type " {:typ typ}))
-                    (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
-                    (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
-                    (let [param-name (:name (first (:params (first (:methods expr)))))
-                          ctx-var-name (gensym param-name) ; Since param-name is gensymmed, I'm guessing we can just use the existing one and avoid the renaming?
-                          ctx-elem {:c-op :c-var
-                                    :c-var-name ctx-var-name
-                                    :c-typ (:t-param typ)}]
-                      (-> (typecheck (ctx-conj ctx ctx-elem)
-                                     (rename-var ctx-var-name param-name (:body (first (:methods expr))))
-                                     (:t-ret typ))
-                          (ctx-drop ctx-elem))))
-            (let [{typ' :type ctx' :ctx} (typesynth ctx expr)]
-              (prn "synthed: " {:type typ' :ctx ctx'})
-              (subtype ctx' (type-apply ctx' typ') (type-apply ctx' typ))))]
-    (prn "typecheck" [(:op expr) {:ctx ctx} expr typ "->" r])
+  (let [r (cond
+            (= :with-meta (:op expr)) (typecheck ctx (:expr expr) typ)
+            (= :do (:op expr)) (typecheck ctx (:ret expr) typ)
+            (and (= :const (:op expr))
+                 (= nil (:val expr))
+                 (= :t-unit (:t-op typ))) typ
+            (and (= :fn (:op expr))
+                 (= :t-fn (:t-op typ)))
+            , (do (assert (= :t-fn (:t-op typ)) (str "type isn't fn type " {:typ typ}))
+                  (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
+                  (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
+                  (let [param-name (:name (first (:params (first (:methods expr)))))
+                        ctx-var-name (gensym param-name) ; Since param-name is gensymmed, I'm guessing we can just use the existing one and avoid the renaming?
+                        ctx-elem {:c-op :c-var
+                                  :c-var-name ctx-var-name
+                                  :c-typ (:t-param typ)}]
+                    (-> (typecheck (ctx-conj ctx ctx-elem)
+                                   (rename-var ctx-var-name param-name (:body (first (:methods expr))))
+                                   (:t-ret typ))
+                        (ctx-drop ctx-elem))))
+            (= :t-forall (:t-op typ))
+            , (let [fresh (gensym (:t-var-name typ))
+                    ctx-elem {:c-op :c-forall
+                              :c-var-name fresh}]
+                (-> (typecheck (ctx-conj ctx ctx-elem)
+                               expr
+                               (type-substitute (:t-op :t-var :t-var-name fresh)
+                                                (:t-var-name typ)
+                                                (:t-ret typ)))
+                    (ctx-drop ctx-elem)))
+            :else (let [{typ' :type ctx' :ctx} (typesynth ctx expr)]
+                    (prn "synthed: " {:type typ' :ctx ctx'})
+                    (subtype ctx' (type-apply ctx' typ') (type-apply ctx' typ))))]
+    (prn "typechecked" (:op expr) [{:ctx ctx} expr typ "->" r])
     r))
 
 (defn typesynth
   "returns {:type t :ctx c}"
   [ctx expr]
-  (prn "typesynth" [ctx expr])
+  (prn "typesynth" (:op expr) [ctx expr])
   (case (:op expr)
+    :const (if (= (:val expr) nil)
+             {:type {:t-op :t-unit} :ctx ctx}
+             (throw (ex-info "Can't synth type for " expr)))
     :local (if-let [typ (find-var-type ctx (:name expr))] ;; (fn and let vars are both :local) - those bound by the env are inlined it seems? (why would these be and not let-bounds vars?
              {:type typ :ctx ctx}
              (throw (ex-info "var not found in context" {:ctx ctx :expr expr})))
@@ -397,6 +425,7 @@
   (prn "subtype" [ctx typ1 typ2])
   (let [err (fn [msg] (throw (ex-info msg {:v1 typ1 :v2 typ2})))]
     (case [(:t-op typ1) (:t-op typ2)]
+      [:t-unit :t-unit] ctx
       [:t-var :t-var] (if (= (:t-var-name typ1) (:t-var-name typ1)) ctx (err "Vars don't match"))
       [:t-fn :t-fn] (let [ctx' (subtype ctx (:t-param typ2) (:t-param typ1))] ; Note polarity swap!
                       (subtype ctx' (type-apply ctx' (:t-ret typ1) (:t-ret typ2))))
