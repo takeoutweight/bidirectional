@@ -60,4 +60,23 @@
   (is (= (infer '((fn [x] x) (fn [x] x)))
          {:t-op :t-fn,
           :t-param {:t-op :t-exists, :t-var-name 'G},
-          :t-ret {:t-op :t-exists, :t-var-name 'G}})))
+          :t-ret {:t-op :t-exists, :t-var-name 'G}}))
+  ;; and is THIS right as well?
+  (is (= (infer '(ann ((fn [x] x) (fn [x] x)) {:t-op :t-forall :t-var-name 'a
+                                               :t-ret {:t-op :t-fn
+                                                       :t-param {:t-op :t-var :t-var-name 'a}
+                                                       :t-ret   {:t-op :t-var :t-var-name 'a}}}))
+         {:t-op :t-forall :t-var-name 'a
+          :t-ret {:t-op :t-fn
+                  :t-param {:t-op :t-var :t-var-name 'a}
+                  :t-ret   {:t-op :t-var :t-var-name 'a}}})
+      "If we explicitly ask for polymorphism on the fancy application we get it")
+  (is (= (infer '(ann ((fn [x] x) (fn [x] x)) {:t-op :t-forall :t-var-name 'a
+                                               :t-ret {:t-op :t-fn
+                                                       :t-param {:t-op :t-unit}
+                                                       :t-ret   {:t-op :t-unit}}}))
+         {:t-op :t-forall :t-var-name 'a
+          :t-ret {:t-op :t-fn
+                  :t-param {:t-op :t-unit}
+                  :t-ret   {:t-op :t-unit}}})
+      "fancy application can be fixed to a monotype with an annotation"))
