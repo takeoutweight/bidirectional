@@ -44,11 +44,12 @@
                                :t-param {:t-op :t-var :t-var-name 'a}
                                :t-ret   {:t-op :t-var :t-var-name 'a}}}))
       "you can't wrongly promise polymorphic return")
-  ;; Q: Following examples, typesynth doesn't type-apply itself, you have to remember. Is this important or incidental?
+  ;; Q: Following examples, typesynth doesn't type-apply its return value, you have to remember. Is this important or incidental?
   (is (= (renumber-varnames (:type (typesynth [] (taj/analyze+eval '((fn [x] x) nil) (taj/empty-env)))))
          {:t-op :t-exists, :t-var-name 'invokeforall}))
   (is (= (infer '((fn [x] x) nil))
-         {:t-op :t-unit}))
+         {:t-op :t-unit})
+      "function application fixes polymorphic fns")
   (is (= (check '(fn [x] x) {:t-op :t-fn :t-param {:t-op :t-unit} :t-ret {:t-op :t-unit}})
          [])
       "can check a polymorphic fn at a less polymorphic type")
