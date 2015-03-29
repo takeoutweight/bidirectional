@@ -477,4 +477,10 @@
   (assoc (taj/empty-env)
          :locals {'fun1 (taem/elide-meta (taj/analyze+eval '(fn [x] x) (taj/empty-env)))}))
 
+(defn infer
+  [code]
+  (renumber-varnames
+   (apply type-apply ((juxt :ctx :type)
+                      (typesynth [] (taj/analyze+eval code (taj/empty-env)))))))
+
 #_(taj/analyze+eval '(+ 1 2) (taj/empty-env))
