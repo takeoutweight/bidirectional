@@ -92,6 +92,10 @@
 (defmethod map-type :t-forall [f t] (update-keys t [:t-ret] f))
 (defmethod map-type :t-fn     [f t] (update-keys t [:t-param :t-ret] f))
 
+(defn update-type
+  "arg flipped map-type"
+  [t f] (map-type f t))
+
 (defn type-apply ;; apply Context.hs
   "looks up a type with the solved existentals replaced with what they're solved with?
    takes a type and returns a type."
@@ -122,21 +126,16 @@
             (renumber
               [typ]
               (case (:t-op typ)
-                :t-unit typ
                 :t-forall
-                (-> typ
-                    (assoc-in [:t-var-name] (fresh typ))
-                    (update-in [:t-ret] #(renumber %)))
-                :t-fn (-> typ
-                          (update-in [:t-param] #(renumber %))
-                          (update-in [:t-ret] #(renumber %)))
+                (->> (assoc-in typ [:t-var-name] (fresh typ))
+                     (map-type renumber))
                 :t-exists (if-let [new-name (get @env (:t-var-name typ))] ;; existentials implicitly range over entire expression
                             (assoc-in typ [:t-var-name] new-name)
                             (assoc-in typ [:t-var-name] (fresh typ)))
                 :t-var (if-let [new-name (get @env (:t-var-name typ))]
                          (assoc-in typ [:t-var-name] new-name)
                          (throw (ex-info "No name provided for var " {:typ typ})))
-                (throw (ex-info "Can't rename " {:type typ :case (case (:t-op typ) :t-var true false)}))))]
+                (map-type renumber typ)))]
       (renumber typ))))
 
 (defn analyze-annotations
