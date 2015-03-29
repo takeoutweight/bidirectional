@@ -230,7 +230,7 @@
             (= :do (:op expr)) (typecheck ctx (:ret expr) typ)
             (and (= :const (:op expr))
                  (= nil (:val expr))
-                 (= :t-unit (:t-op typ))) typ
+                 (= :t-unit (:t-op typ))) ctx
             (and (= :fn (:op expr))
                  (= :t-fn (:t-op typ)))
             , (do (assert (= :t-fn (:t-op typ)) (str "type isn't fn type " {:typ typ}))
@@ -251,7 +251,7 @@
                               :c-var-name fresh}]
                 (-> (typecheck (ctx-conj ctx ctx-elem)
                                expr
-                               (type-substitute (:t-op :t-var :t-var-name fresh)
+                               (type-substitute {:t-op :t-var :t-var-name fresh}
                                                 (:t-var-name typ)
                                                 (:t-ret typ)))
                     (ctx-drop ctx-elem)))
@@ -479,8 +479,13 @@
 
 (defn infer
   [code]
-  (renumber-varnames
-   (apply type-apply ((juxt :ctx :type)
-                      (typesynth [] (taj/analyze+eval code (taj/empty-env)))))))
+  (let [{:keys [ctx type]} (typesynth [] (taj/analyze+eval code (taj/empty-env)))]
+    (-> (type-apply ctx type)
+        (renumber-varnames))))
+
+(defn check
+  "returns context if code typechecks"
+  [code typ]
+  (typecheck [] (taj/analyze+eval code (taj/empty-env)) typ))
 
 #_(taj/analyze+eval '(+ 1 2) (taj/empty-env))
