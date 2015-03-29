@@ -395,8 +395,10 @@
                                       [(c-exists ret')
                                        (c-exists param')
                                        (c-exists-solved t-var-name {:t-op :t-fn
-                                                                    :t-param {:t-exists param'}
-                                                                    :t-ret {:t-exists ret'}})]
+                                                                    :t-param {:t-op :t-exists
+                                                                              :t-var-name param'}
+                                                                    :t-ret {:t-op :t-exists
+                                                                            :t-var-name ret'}})]
                                       ctx-r))
                         (:t-param typ)
                         param')]
@@ -432,8 +434,10 @@
                                       [(c-exists ret')
                                        (c-exists param')
                                        (c-exists-solved t-var-name {:t-op :t-fn
-                                                                    :t-param {:t-exists param'}
-                                                                    :t-ret {:t-exists ret'}})]
+                                                                    :t-param {:t-op :t-exists
+                                                                              :t-var-name param'}
+                                                                    :t-ret {:t-op :t-exists
+                                                                            :t-var-name ret'}})]
                                       ctx-r))
                         param'
                         (:t-param typ))]
