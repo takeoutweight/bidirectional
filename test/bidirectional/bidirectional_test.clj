@@ -21,5 +21,5 @@
          {:t-op :t-exists, :t-var-name 'invokeforall}))
   (is (= (infer '((fn [x] x) nil))
          {:t-op :t-unit}))
-  ;; FIXME - it's an existential type not a fn type. I screwed something up. It might also not be possible because it's too polymorphic? But how to get a nicer error message for that?
+  ;; FIXME - it's an existential type not a fn type. I screwed something up. It might also not be possible because it's too polymorphic (maybe now we're just prenex poly)? But how to get a nicer error message for that?
   #_(is (renumber-varnames (:type (typesynth [] (taj/analyze+eval '((fn [x] x) (fn [x] x)) (taj/empty-env)))))))
