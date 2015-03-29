@@ -244,15 +244,12 @@
   "sub new-typ for t-var-name in typ"
   [new-typ t-var-name typ]
   (let [r (case (:t-op typ)
-            :t-unit typ
             :t-var (if (= t-var-name (:t-var-name typ)) new-typ typ)
             :t-exists (if (= t-var-name (:t-var-name typ)) new-typ typ)
             :t-forall (if (= t-var-name (:t-var-name typ))
                         (do (println "Should this ever happen with hygenic vars??") typ)
                         (update-in typ [:t-ret] #(type-substitute new-typ t-var-name %)))
-            :t-fn (-> typ
-                      (update-in [:t-param] #(type-substitute new-typ t-var-name %))
-                      (update-in [:t-ret] #(type-substitute new-typ t-var-name %))))]
+            (map-type #(type-substitute new-typ t-var-name %) typ))]
     (prn "type-substitute" [new-typ t-var-name typ "->" r])
     r))
 
