@@ -63,7 +63,7 @@
     :t-exists (contains? (existentials ctx)
                          (:t-var-name typ))))
 
-(defn find-solved
+(defn find-solved ;; findSolved Context.hs
   "returns nil or the solved monotype"
   [ctx var-name]
   (:c-typ (first (filter (fn [c-elem] (and (= :c-exists-solved (:c-op c-elem))
@@ -152,12 +152,13 @@
     (throw (ex-info "can't monotype" {:type typ}))))
 
 (defn solve
-  "this seems nedlessly complex if it's just a wf check?"
+  "This unifies an existentail to a monotype"
   [ctx t-var-name typ]
   (assert (monotype? typ) "Can only solve for monotypes -- forgot a guard?")
   (let [[ctx-l ctx-r] (ctx-break ctx {:c-op :c-exists :c-var-name t-var-name})]
     (if (type-wf ctx-l typ) ;; Q: What does this check represent?
-      {:solved  (ctx-concat ctx-l [(c-exists-solved t-var-name typ)] ctx-r)}
+      (do (prn "solve: " [t-var-name typ "->" (c-exists-solved t-var-name typ)])
+          {:solved  (ctx-concat ctx-l [(c-exists-solved t-var-name typ)] ctx-r)})
       {:unsolved true})))
 
 (defn free-t-vars
@@ -223,6 +224,7 @@
 (defn typecheck
   "returns updated ctx"
   [ctx expr typ]
+  (assert (vector? ctx))
   (let [r (cond
             (= :with-meta (:op expr)) (typecheck ctx (:expr expr) typ)
             (= :do (:op expr)) (typecheck ctx (:ret expr) typ)
@@ -260,9 +262,10 @@
     r))
 
 (defn typesynth
-  "returns {:type t :ctx c}"
+  "returns {:type t :ctx c} -- does not type-apply the result (should it?)"
   [ctx expr]
   (prn "typesynth" (:op expr) [ctx expr])
+  (assert (vector? ctx))
   (case (:op expr)
     :const (if (= (:val expr) nil)
              {:type {:t-op :t-unit} :ctx ctx}
@@ -312,11 +315,12 @@
                :ctx ctx-l}))
     :invoke (let [{typ :type ctx' :ctx} (typesynth ctx (:fn expr))]
               (assert (= 1 (count (:args expr))) "only supports single arguments right now")
-              (typeapplysynth typ (type-apply ctx' typ) (first (:args expr))))))
+              (typeapplysynth ctx' (type-apply ctx' typ) (first (:args expr))))))
 
 (defn typeapplysynth
   "type checks the actual argument of an invocation, given the type of the function."
   [ctx typ expr]
+  (assert (vector? ctx))
   (case (:t-op typ)
     :with-meta (typeapplysynth ctx typ (:expr expr))
     :t-forall (let [g (gensym "invokeforall")]
@@ -350,6 +354,7 @@
 (defn instantiate-l
   "returns a context"
   [ctx t-var-name typ]
+  (prn "instantiate-l" [ctx t-var-name typ])
   (if-let [ctx' (:solved (and (monotype? typ)
                               (solve ctx t-var-name typ)))]
     ctx'
@@ -386,6 +391,7 @@
 (defn instantiate-r
   "Q: Why are the args flipped from instantiate-l on this one? is that important?"
   [ctx typ t-var-name]
+  (prn "instantiate-r" [ctx typ t-var-name])
   (if-let [ctx' (:solved (and (monotype? typ) ; same as before
                               (solve ctx t-var-name typ)))]
     ctx'
@@ -423,7 +429,7 @@
   "typ1 < typ2 - returns a new context"
   [ctx typ1 typ2]
   (prn "subtype" [ctx typ1 typ2])
-  (let [err (fn [msg] (throw (ex-info msg {:v1 typ1 :v2 typ2})))]
+  (let [err (fn [msg] (throw (ex-info msg {:ctx ctx :t1 typ1 :t2 typ2})))]
     (case [(:t-op typ1) (:t-op typ2)]
       [:t-unit :t-unit] ctx
       [:t-var :t-var] (if (= (:t-var-name typ1) (:t-var-name typ1)) ctx (err "Vars don't match"))
@@ -462,7 +468,8 @@
         (and (= :t-exists (:t-op typ2))
              (contains? (existentials ctx) (:t-var-name typ2))
              (not (contains? (free-t-vars typ1) (:t-var-name typ2))))
-        , (instantiate-r ctx typ1 (:t-var-name typ2))))))
+        , (instantiate-r ctx typ1 (:t-var-name typ2))
+          :else (err "No matching subtype case")))))
 
 ;;;;;;;;; Scratch ;;;;;;;;;
 

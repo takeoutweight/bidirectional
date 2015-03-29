@@ -16,8 +16,10 @@
           :t-ret {:t-op :t-fn,
                   :t-param {:t-op :t-var, :t-var-name 'freshes},
                   :t-ret {:t-op :t-unit}}}))
-  ;; FIXME - returning an UnknownExistential not Unit
-  #_(is (= (renumber-varnames (:type (typesynth [] (taj/analyze+eval '((fn [x] x) nil) (taj/empty-env)))))
+  ;; Q: Following examples, typesynth doesn't type-apply itself, you have to remember. Is this important or incidental?
+  (is (= (renumber-varnames (:type (typesynth [] (taj/analyze+eval '((fn [x] x) nil) (taj/empty-env)))))
+         {:t-op :t-exists, :t-var-name 'invokeforall}))
+  (is (= (apply type-apply ((juxt :ctx :type) (typesynth [] (taj/analyze+eval '((fn [x] x) nil) (taj/empty-env)))))
          {:t-op :t-unit}))
   ;; FIXME - it's an existential type not a fn type. I screwed something up. It might also not be possible because it's too polymorphic? But how to get a nicer error message for that?
   #_(is (renumber-varnames (:type (typesynth [] (taj/analyze+eval '((fn [x] x) (fn [x] x)) (taj/empty-env)))))))
