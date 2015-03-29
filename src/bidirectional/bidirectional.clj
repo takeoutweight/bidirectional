@@ -63,6 +63,9 @@
     :t-exists (contains? (existentials ctx)
                          (:t-var-name typ))))
 
+;;; FIXME I'm not sure this is what this fn is doing? I think we're effectively
+;;; resolving to the "leftmost" unsolved existential, even if it's not yet
+;;; resolved to a monotype. Is this right/ok?
 (defn find-solved ;; findSolved Context.hs
   "returns nil or the solved monotype"
   [ctx var-name]
@@ -91,6 +94,7 @@
     :t-var typ
     (throw (ex-info "Can't type apply" {:ctx ctx :type typ}))))
 
+;;; TODO Might be handy to renumber the context too (for showing unsolved existentials etc)
 (defn renumber-varnames
   "renames gensyms to something stable. Recognizes gensyms via regex so just clips off post-fix number"
   [typ]
@@ -118,7 +122,9 @@
                 :t-fn (-> typ
                           (update-in [:t-param] #(renumber %))
                           (update-in [:t-ret] #(renumber %)))
-                :t-exists (assoc-in typ [:t-var-name] (fresh typ))
+                :t-exists (if-let [new-name (get @env (:t-var-name typ))] ;; existentials implicitly range over entire expression
+                            (assoc-in typ [:t-var-name] new-name)
+                            (assoc-in typ [:t-var-name] (fresh typ)))
                 :t-var (if-let [new-name (get @env (:t-var-name typ))]
                          (assoc-in typ [:t-var-name] new-name)
                          (throw (ex-info "No name provided for var " {:typ typ})))
