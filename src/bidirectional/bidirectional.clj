@@ -18,6 +18,8 @@
   [& forms]
   `(->> ~@(reverse forms)))
 
+(def ann) ;; Unbound - keyword reserved for type annotations.
+
 (defn ctx-conj
   [ctx ctx-elem]
   (conj ctx ctx-elem))
@@ -78,21 +80,27 @@
   [ctx]
   (into #{} (filter #(#{:c-exists} (:c-op %)) ctx)))
 
-(defn type-apply ; apply Context.hs
+(defn update-keys
+  "update-in over parallel sibling keys, (i.e. not nested keys like update-in)"
+  [m ks f]
+  (reduce (fn [m k] (update-in m [k] f)) m ks))
+
+;;; Types are functorial
+(defmulti map-type (fn [f t] (:t-op t)))
+(defmethod map-type :t-unit   [f t] t)
+(defmethod map-type :t-var    [f t] t)
+(defmethod map-type :t-forall [f t] (update-keys t [:t-ret] f))
+(defmethod map-type :t-fn     [f t] (update-keys t [:t-param :t-ret] f))
+
+(defn type-apply ;; apply Context.hs
   "looks up a type with the solved existentals replaced with what they're solved with?
    takes a type and returns a type."
   [ctx typ]
-  (case (:t-op typ)
-    :t-unit typ
-    :t-forall (update-in typ [:t-ret] #(type-apply ctx %))
-    :t-fn (-> typ
-              (update-in [:t-param] #(type-apply ctx %))
-              (update-in [:t-ret] #(type-apply ctx %)))
-    :t-exists (if-let [typ' (find-solved ctx (:t-var-name typ))]
-                (type-apply ctx typ')
-                typ)
-    :t-var typ
-    (throw (ex-info "Can't type apply" {:ctx ctx :type typ}))))
+  (if (= :t-exists (:t-op typ))
+    (if-let [typ' (find-solved ctx (:t-var-name typ))]
+      (type-apply ctx typ')
+      typ)
+    (map-type #(type-apply ctx %) typ)))
 
 ;;; TODO Might be handy to renumber the context too (for showing unsolved existentials etc)
 (defn renumber-varnames
@@ -507,8 +515,6 @@
 
 ;;;;;;;;; Scratch ;;;;;;;;;
 
-(def ann) ;; Unbound - keyword reserved for type annotations.
-
 (def builtin-env
   (-> (taj/empty-env)
       (assoc `annotations ::annotation))) ;; This doesn't seem to work, just defining it for real seems to work though.
@@ -533,3 +539,5 @@
     (typecheck [] ana typ)))
 
 #_(taj/analyze+eval '(+ 1 2) (taj/empty-env))
+
+(def test-code '((fn [x] x) nil))
