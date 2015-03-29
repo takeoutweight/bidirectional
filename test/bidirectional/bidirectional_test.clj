@@ -55,5 +55,8 @@
   (is (= (check '(fn [x] nil) {:t-op :t-forall :t-var-name 'a :t-ret {:t-op :t-fn :t-param {:t-op :t-unit} :t-ret {:t-op :t-unit}}})
          [])
       "un-used polymorphic variables are OK")
-  ;; FIXME - it's an existential type not a fn type. I screwed something up. It might also not be possible because it's too polymorphic (maybe now we're just prenex poly)? But how to get a nicer error message for that?
-  #_(is (renumber-varnames (:type (typesynth [] (taj/analyze+eval '((fn [x] x) (fn [x] x)) (taj/empty-env)))))))
+  ;; Is this right? due to prenex polymorphism it must resolve to some monotype?
+  (is (= (infer '((fn [x] x) (fn [x] x)))
+         {:t-op :t-fn,
+          :t-param {:t-op :t-exists, :t-var-name 'G},
+          :t-ret {:t-op :t-exists, :t-var-name 'G}})))
