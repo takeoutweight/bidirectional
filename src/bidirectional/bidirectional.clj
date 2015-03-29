@@ -497,7 +497,7 @@
              (contains? (existentials ctx) (:t-var-name typ2))
              (not (contains? (free-t-vars typ1) (:t-var-name typ2))))
         , (instantiate-r ctx typ1 (:t-var-name typ2))
-          :else (err "No matching subtype case")))))
+        :else (err "No matching subtype case")))))
 
 ;;;;;;;;; Scratch ;;;;;;;;;
 
