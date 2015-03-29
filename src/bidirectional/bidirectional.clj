@@ -125,6 +125,29 @@
                 (throw (ex-info "Can't rename " {:type typ :case (case (:t-op typ) :t-var true false)}))))]
       (renumber typ))))
 
+(defn analyze-annotations
+  "changes analysis of forms (bidirectional.bidirectional/ann expr type) from :invoke to
+  :annotation"
+  [expr]
+  (cond
+    (and (= :invoke (:op expr))
+         (= :var (:op (:fn expr)) )
+         (= #'bidirectional.bidirectional/ann (:var (:fn expr))))
+    , (do
+        (assert (= 2 (count (:args expr))) "annotation should have two arguments: (ann expr type)")
+        (assert (:literal? (second (:args expr))) "second argument to ann must be a type literal")
+        (-> expr
+            (assoc :op :annotation)
+            (assoc :type (:val (second (:args expr))))
+            (assoc :expr (analyze-annotations (first (:args expr))))
+            (assoc :children [:expr])
+            (dissoc :args :fn :result :tag :o-tag)))
+    (vector? expr) (vec (map analyze-annotations expr)) ;; eg: for :args children traversal
+    :else (reduce (fn [e key]
+                    (update-in e [key] analyze-annotations))
+                  expr
+                  (:children expr))))
+
 (defn c-marker
   "constructor"
   [c-var-name]
@@ -186,7 +209,8 @@
   (prn "rename-var" [new-name for-name expr])
   (case (:op expr)
     :const expr
-    :with-meta (update-in expr [:expr] #(rename-var new-name for-name %))
+    :with-meta  (update-in expr [:expr] #(rename-var new-name for-name %))
+    :annotation (update-in expr [:expr] #(rename-var new-name for-name %))
     :do (-> (<<- (update-in expr [:statements]) (fn [ss])
                  (vec) (for [s ss])
                  (rename-var new-name for-name s))
@@ -434,7 +458,7 @@
       [:t-unit :t-unit] ctx
       [:t-var :t-var] (if (= (:t-var-name typ1) (:t-var-name typ1)) ctx (err "Vars don't match"))
       [:t-fn :t-fn] (let [ctx' (subtype ctx (:t-param typ2) (:t-param typ1))] ; Note polarity swap!
-                      (subtype ctx' (type-apply ctx' (:t-ret typ1) (:t-ret typ2))))
+                      (subtype ctx' (type-apply ctx' (:t-ret typ1))  (type-apply ctx' (:t-ret typ2))))
       (cond
         (= :t-forall (:t-op typ2)) (let [var-name' (gensym "subtype-r")
                                          ctx-elem {:c-op :c-forall
@@ -473,19 +497,29 @@
 
 ;;;;;;;;; Scratch ;;;;;;;;;
 
+(def ann) ;; Unbound - keyword reserved for type annotations.
+
+(def builtin-env
+  (-> (taj/empty-env)
+      (assoc `annotations ::annotation))) ;; This doesn't seem to work, just defining it for real seems to work though.
+
 (def sample-env
   (assoc (taj/empty-env)
          :locals {'fun1 (taem/elide-meta (taj/analyze+eval '(fn [x] x) (taj/empty-env)))}))
 
 (defn infer
   [code]
-  (let [{:keys [ctx type]} (typesynth [] (taj/analyze+eval code (taj/empty-env)))]
+  (let [ana (-> (taj/analyze+eval code (taj/empty-env))
+                (analyze-annotations))
+        {:keys [ctx type]} (typesynth [] ana)]
     (-> (type-apply ctx type)
         (renumber-varnames))))
 
 (defn check
   "returns context if code typechecks"
   [code typ]
-  (typecheck [] (taj/analyze+eval code (taj/empty-env)) typ))
+  (let [ana (-> (taj/analyze+eval code (taj/empty-env))
+                (analyze-annotations))]
+    (typecheck [] ana typ)))
 
 #_(taj/analyze+eval '(+ 1 2) (taj/empty-env))
