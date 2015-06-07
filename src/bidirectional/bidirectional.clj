@@ -86,7 +86,7 @@
   (reduce (fn [m k] (update-in m [k] f)) m ks))
 
 ;;; Types are functorial
-(defmulti map-type (fn [f t] (:t-op t)))
+(defmulti  map-type (fn [f t] (:t-op t)))
 (defmethod map-type :t-unit   [f t] t)
 (defmethod map-type :t-var    [f t] t)
 (defmethod map-type :t-forall [f t] (update-keys t [:t-ret] f))
@@ -176,16 +176,13 @@
   [c-var-name typ]
   {:c-op :c-exists-solved :c-var-name c-var-name :c-typ typ})
 
-(defn monotype?
-  [typ]
-  (case (:t-op typ)
-    :t-unit true
-    :t-var true
-    :t-exists true
-    :t-forall false
-    :t-fn (and (monotype? (:t-param typ))
-               (monotype? (:t-ret typ)))
-    (throw (ex-info "can't monotype" {:type typ}))))
+(defmulti  monotype? :t-op)
+(defmethod monotype? :t-unit [_] true)
+(defmethod monotype? :t-var  [_] true)
+(defmethod monotype? :t-exists [_] true)
+(defmethod monotype? :t-forall [_] false)
+(defmethod monotype? :t-fn [t] (and (monotype? (:t-param t))
+                                    (monotype? (:t-ret t))))
 
 (defn solve
   "This unifies an existentail to a monotype"
@@ -385,7 +382,8 @@
     (throw (ex-info "Can't check this invoke" {:ctx ctx :typ typ :expr expr}))))
 
 (defn instantiate
-  "returns a context"
+  "returns a context.
+  direction is which side of < the existential is on that we're trying to instantiate."
   [ctx t-var-name dir typ]
   (prn "instantiate-l" [ctx t-var-name typ])
   (let [flip #(case % :left :right :right :left)]
