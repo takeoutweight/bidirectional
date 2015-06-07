@@ -410,8 +410,8 @@
                                                                     :t-ret {:t-op :t-exists
                                                                             :t-var-name ret'}})]
                                       ctx-r))
-                        (:t-param typ)
-                        param')]
+                        param'
+                        (:t-param typ))]
               (instantiate-l ctx' ret' (type-apply ctx' (:t-ret typ))))
       :t-forall (let [var-name' (gensym)
                       ctx-elem {:c-op :c-forall
@@ -426,7 +426,7 @@
 
 (defn instantiate-r
   "Q: Why are the args flipped from instantiate-l on this one? is that important?"
-  [ctx typ t-var-name]
+  [ctx t-var-name typ]
   (prn "instantiate-r" [ctx typ t-var-name])
   (if-let [ctx' (:solved (and (monotype? typ) ; same as before
                               (solve ctx t-var-name typ)))]
@@ -451,16 +451,16 @@
                                       ctx-r))
                         param'
                         (:t-param typ))]
-              (instantiate-r ctx' (type-apply ctx' (:t-ret typ)) ret'))
+              (instantiate-r ctx' ret' (type-apply ctx' (:t-ret typ))))
       :t-forall (let [var-name' (gensym) ; This one is the difference! it flips the forall to an existential!.
                       ctx-marker (c-marker var-name')
                       ctx-elem (c-exists-solved var-name')]
                   (-> (instantiate-r (ctx-concat ctx [ctx-marker ctx-elem]) ; Why wasn't this a ctx-conj? added to the other end?
+                                     t-var-name
                                      (type-substitute {:t-op :t-exists ; and replacing with an exists here instead of forall.
                                                        :t-var-name var-name'}
                                                       (:t-var-name typ)
-                                                      (:t-ret typ))
-                                     t-var-name)
+                                                      (:t-ret typ)))
                       (ctx-drop ctx-marker))))))
 
 (defn subtype
@@ -506,7 +506,7 @@
         (and (= :t-exists (:t-op typ2))
              (contains? (existentials ctx) (:t-var-name typ2))
              (not (contains? (free-t-vars typ1) (:t-var-name typ2))))
-        , (instantiate-r ctx typ1 (:t-var-name typ2))
+        , (instantiate-r ctx (:t-var-name typ2) typ1)
         :else (err "No matching subtype case")))))
 
 ;;;;;;;;; Scratch ;;;;;;;;;
