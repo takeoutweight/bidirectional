@@ -59,7 +59,7 @@
     :t-var (contains? (into #{} (map :c-var-name (filter #(= :c-forall (:c-op %)) ctx)))
                       (:t-var-name typ))
     :t-fn (and (type-wf ctx (:t-param typ))
-               (type-wf ctx (:t-param typ)))
+               (type-wf ctx (:t-ret typ)))
     :t-forall (type-wf (ctx-conj ctx {:c-op :c-forall :c-var-name (:t-var-name typ)})
                        (:t-ret typ))
     :t-exists (contains? (existentials ctx)
