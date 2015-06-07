@@ -253,7 +253,7 @@
     (prn "type-substitute" [new-typ t-var-name typ "->" r])
     r))
 
-(declare subtype typesynth typeapplysynth)
+(declare subtype typesynth typesynth-invoke)
 
 (defn typecheck
   "returns updated ctx"
@@ -349,20 +349,20 @@
                :ctx ctx-l}))
     :invoke (let [{typ :type ctx' :ctx} (typesynth ctx (:fn expr))]
               (assert (= 1 (count (:args expr))) "only supports single arguments right now")
-              (typeapplysynth ctx' (type-apply ctx' typ) (first (:args expr))))))
+              (typesynth-invoke ctx' (type-apply ctx' typ) (first (:args expr))))))
 
-(defn typeapplysynth
+(defn typesynth-invoke
   "type checks the actual argument of an invocation, given the type of the function."
   [ctx typ expr]
   (assert (vector? ctx))
   (case (:t-op typ)
-    :with-meta (typeapplysynth ctx typ (:expr expr))
+    :with-meta (typesynth-invoke ctx typ (:expr expr))
     :t-forall (let [g (gensym "invokeforall")]
-                (typeapplysynth (ctx-conj ctx {:c-op :c-exists :c-var-name g})
-                                (type-substitute {:t-op :t-exists :t-var-name g}
-                                                 (:t-var-name typ)
-                                                 (:t-ret typ))
-                                expr))
+                (typesynth-invoke (ctx-conj ctx {:c-op :c-exists :c-var-name g})
+                                  (type-substitute {:t-op :t-exists :t-var-name g}
+                                                   (:t-var-name typ)
+                                                   (:t-ret typ))
+                                  expr))
     :t-exists (let [garg (gensym "invoke-exarg") ;; refining our knowledge of an existential variable
                     gret (gensym "invoke-gret")
                     [ctx-l ctx-r] (ctx-break ctx {:c-op :c-exists :c-var-name (:t-var-name typ)})
