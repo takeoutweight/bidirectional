@@ -86,7 +86,7 @@
   (reduce (fn [m k] (update-in m [k] f)) m ks))
 
 ;;; Types are functorial
-(defmulti  map-type (fn [f t] (:t-op t)))
+(defmulti map-type (fn [f t] (:t-op t)))
 (defmethod map-type :t-unit   [f t] t)
 (defmethod map-type :t-var    [f t] t)
 (defmethod map-type :t-forall [f t] (update-keys t [:t-ret] f))
@@ -176,13 +176,13 @@
   [c-var-name typ]
   {:c-op :c-exists-solved :c-var-name c-var-name :c-typ typ})
 
-(defmulti  monotype? :t-op)
+(defmulti monotype? :t-op)
 (defmethod monotype? :t-unit [_] true)
 (defmethod monotype? :t-var  [_] true)
 (defmethod monotype? :t-exists [_] true)
 (defmethod monotype? :t-forall [_] false)
-(defmethod monotype? :t-fn [t] (and (monotype? (:t-param t))
-                                    (monotype? (:t-ret t))))
+(defmethod monotype? :t-fn [typ] (and (monotype? (:t-param typ))
+                                      (monotype? (:t-ret typ))))
 
 (defn solve
   "This unifies an existentail to a monotype"
@@ -194,16 +194,14 @@
           {:solved  (ctx-concat ctx-l [(c-exists-solved t-var-name typ)] ctx-r)})
       {:unsolved true})))
 
-(defn free-t-vars
-  "returns the set of t-var-names that are free"
-  [typ]
-  (case (:t-op typ)
-    :t-unit #{}
-    :t-var #{(:t-var-name typ)}
-    :t-exists #{(:t-var-name typ)}
-    :t-forall (set/difference (free-t-vars (:t-ret typ)) #{(:t-var-name typ)})
-    :t-fn (set/union (free-t-vars (:t-param typ))
-                     (free-t-vars (:t-ret typ)))))
+(defmulti free-t-vars :t-op)
+(defmethod free-t-vars :t-unit [_] #{})
+(defmethod free-t-vars :t-var [typ] #{(:t-var-name typ)})
+(defmethod free-t-vars :t-exists [typ] #{(:t-var-name typ)})
+(defmethod free-t-vars :t-forall [typ] (set/difference (free-t-vars (:t-ret typ))
+                                                       #{(:t-var-name typ)}))
+(defmethod free-t-vars :t-fn [typ] (set/union (free-t-vars (:t-param typ))
+                                              (free-t-vars (:t-ret typ))))
 
 (defn ordered?
   "b occurs after a in ctx"
