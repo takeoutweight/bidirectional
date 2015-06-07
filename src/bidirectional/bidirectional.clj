@@ -209,31 +209,42 @@
   (let [ctx-l (ctx-drop ctx (c-exists t-var-name-b))]
     (contains? (existentials ctx-l) t-var-name-a)))
 
-(defn rename-var
+(defmulti rename-var
   "a la substitution: [new-name / for-name]expr
   This assumes analysis has already freshly renamed all variables.
   for-name is the actual symbol name to rebind (not the analyzed local var form)"
+  (fn [new-name for-name expr] (:op expr)) )
+(defmethod rename-var :const
+  [new-name for-name expr] expr)
+(defmethod rename-var :with-meta
   [new-name for-name expr]
-  (prn "rename-var" [new-name for-name expr])
-  (case (:op expr)
-    :const expr
-    :with-meta  (update-in expr [:expr] #(rename-var new-name for-name %))
-    :annotation (update-in expr [:expr] #(rename-var new-name for-name %))
-    :do (-> (<<- (update-in expr [:statements]) (fn [ss])
-                 (vec) (for [s ss])
-                 (rename-var new-name for-name s))
-            (update-in [:ret] #(rename-var new-name for-name %)))
-    :invoke (-> (<<- (update-in expr [:args]) (fn [as])
-                     (vec) (for [a as])
-                     (rename-var new-name for-name a))
-                (update-in [:fn] #(rename-var new-name for-name %)))
-    :fn (<<- (update-in expr [:methods]) (fn [ms])
-             (vec) (for [m ms])
-             (update-in m [:body]) (fn [b])
-             (rename-var new-name for-name b))
-    :local (if (= for-name (:name expr))
-             (assoc expr :name new-name)
-             expr)))
+  (update-in expr [:expr] #(rename-var new-name for-name %)))
+(defmethod rename-var :annotation
+  [new-name for-name expr]
+  (update-in expr [:expr] #(rename-var new-name for-name %)))
+(defmethod rename-var :do
+  [new-name for-name expr]
+  (-> (<<- (update-in expr [:statements]) (fn [ss])
+           (vec) (for [s ss])
+           (rename-var new-name for-name s))
+      (update-in [:ret] #(rename-var new-name for-name %))))
+(defmethod rename-var :invoke
+  [new-name for-name expr]
+  (-> (<<- (update-in expr [:args]) (fn [as])
+           (vec) (for [a as])
+           (rename-var new-name for-name a))
+      (update-in [:fn] #(rename-var new-name for-name %))))
+(defmethod rename-var :fn
+  [new-name for-name expr]
+  (<<- (update-in expr [:methods]) (fn [ms])
+       (vec) (for [m ms])
+       (update-in m [:body]) (fn [b])
+       (rename-var new-name for-name b)))
+(defmethod rename-var :local
+  [new-name for-name expr]
+  (if (= for-name (:name expr))
+    (assoc expr :name new-name)
+    expr))
 
 (defn type-substitute
   "sub new-typ for t-var-name in typ"
