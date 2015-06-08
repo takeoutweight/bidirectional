@@ -246,6 +246,7 @@
     (assoc expr :name new-name)
     expr))
 
+;;; Not a multimethod since it's assumed the map-type should be you need to implement
 (defn type-substitute
   "sub new-typ for t-var-name in typ"
   [new-typ t-var-name typ]
@@ -256,7 +257,7 @@
                         (do (println "Should this ever happen with hygenic vars??") typ)
                         (update-in typ [:t-ret] #(type-substitute new-typ t-var-name %)))
             (map-type #(type-substitute new-typ t-var-name %) typ))]
-    (prn "type-substitute" [new-typ t-var-name typ "->" r])
+    #_(prn "type-substitute" [new-typ t-var-name typ "->" r])
     r))
 
 (declare subtype typesynth typesynth-invoke)
