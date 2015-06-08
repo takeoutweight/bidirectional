@@ -251,12 +251,12 @@
     #_(prn "type-substitute" [new-typ t-var-name typ "->" r])
     r))
 
-(declare subtype typesynth typesynth-invoke)
+(declare subtype typesynth typesynth-invoke typecheck-m)
 
 (defn typecheck
   "returns updated ctx"
   [ctx expr typ]
-  (assert (vector? ctx))
+  #_(typecheck-m ctx expr typ)
   (let [r (cond
             (= :with-meta (:op expr)) (typecheck ctx (:expr expr) typ)
             (= :do (:op expr)) (typecheck ctx (:ret expr) typ)
