@@ -391,62 +391,79 @@
              :ctx ctx'})
     (throw (ex-info "Can't check this invoke" {:ctx ctx :typ typ :expr expr}))))
 
+(defn flip [dir]
+  (case dir :left :right :right :left))
+
+(declare instantiate-poly)
 (defn instantiate
   "returns a context.
   direction is which side of < the existential is on that we're trying to instantiate."
   [ctx t-var-name dir typ]
   (prn "instantiate-l" [ctx t-var-name typ])
-  (let [flip #(case % :left :right :right :left)]
-    (if-let [ctx' (:solved (and (monotype? typ)
-                                (solve ctx t-var-name typ)))]
-      ctx'
-      (case (:t-op typ)
-        :t-exists (if (ordered? ctx t-var-name (:t-var-name typ)) ;; I guess this has to succeed? This seems to just be careful control over the ctx order.
-                    (:solved (solve ctx (:t-var-name typ) {:t-op :t-exists
-                                                           :t-var-name t-var-name}))
-                    (do (prn "NOTE: Weird case hit:") (:solved (solve ctx t-var-name typ)))) ;; Q: How would get to this case? Wouldn't it be hit in the "if" above?!
-        :t-fn (let [param' (gensym)
-                    ret' (gensym)
-                    ctx' (instantiate
-                          (let [[ctx-l ctx-r] (ctx-break ctx (c-exists t-var-name))]
-                            (ctx-concat ctx-l
-                                        [(c-exists ret')
-                                         (c-exists param')
-                                         (c-exists-solved t-var-name {:t-op :t-fn
-                                                                      :t-param {:t-op :t-exists
-                                                                                :t-var-name param'}
-                                                                      :t-ret {:t-op :t-exists
-                                                                              :t-var-name ret'}})]
-                                        ctx-r))
-                          param'
-                          (flip dir)
-                          (:t-param typ))]
-                (instantiate ctx' ret' dir (type-apply ctx' (:t-ret typ))))
-        :t-forall (case dir
-                    :left
-                    , (let [var-name' (gensym)
-                            ctx-elem {:c-op :c-forall
-                                      :c-var-name var-name'}]
-                        (-> (instantiate (ctx-concat ctx [ctx-elem]) ; Why wasn't this a ctx-conj? added to the other end?
-                                         t-var-name
-                                         :left
-                                         (type-substitute {:t-op :t-var ; Is this fresh renaming necessary?
-                                                           :t-var-name var-name'}
-                                                          (:t-var-name typ)
-                                                          (:t-ret typ)))
-                            (ctx-drop ctx-elem)))
-                    :right
-                    ,  (let [var-name' (gensym) ; This one is the difference! it flips the forall to an existential!.
-                             ctx-marker (c-marker var-name')
-                             ctx-elem (c-exists-solved var-name')]
-                         (-> (instantiate (ctx-concat ctx [ctx-marker ctx-elem]) ; Why wasn't this a ctx-conj? added to the other end?
-                                          t-var-name
-                                          :right
-                                          (type-substitute {:t-op :t-exists ; and replacing with an exists here instead of forall.
-                                                            :t-var-name var-name'}
-                                                           (:t-var-name typ)
-                                                           (:t-ret typ)))
-                             (ctx-drop ctx-marker))))))))
+  (if-let [ctx' (:solved (and (monotype? typ)
+                              (solve ctx t-var-name typ)))]
+    ctx'
+    (instantiate-poly ctx t-var-name dir typ)))
+
+(defmulti instantiate-poly
+  "Called for types where monotype? has returned false."
+  (fn [ctx t-var-name dir typ] (:t-op typ)))
+
+(defmethod instantiate-poly :t-exists
+  [ctx t-var-name dir typ]
+  (if (ordered? ctx t-var-name (:t-var-name typ)) ;; I guess this has to succeed? This seems to just be careful control over the ctx order.
+    (:solved (solve ctx (:t-var-name typ) {:t-op :t-exists
+                                           :t-var-name t-var-name}))
+    (do (throw (ex-info "NOTE: Weird case hit:" {:t-var-name t-var-name :typ typ}))
+        (:solved (solve ctx t-var-name typ)))))
+
+(defmethod instantiate-poly :t-fn
+  [ctx t-var-name dir typ]
+  (let [param' (gensym)
+        ret' (gensym)
+        ctx' (instantiate
+              (let [[ctx-l ctx-r] (ctx-break ctx (c-exists t-var-name))]
+                (ctx-concat ctx-l
+                            [(c-exists ret')
+                             (c-exists param')
+                             (c-exists-solved t-var-name {:t-op :t-fn
+                                                          :t-param {:t-op :t-exists
+                                                                    :t-var-name param'}
+                                                          :t-ret {:t-op :t-exists
+                                                                  :t-var-name ret'}})]
+                            ctx-r))
+              param'
+              (flip dir)
+              (:t-param typ))]
+    (instantiate ctx' ret' dir (type-apply ctx' (:t-ret typ)))))
+
+(defmethod instantiate-poly :t-forall
+  [ctx t-var-name dir typ]
+  (case dir
+    :left
+    , (let [var-name' (gensym)
+            ctx-elem {:c-op :c-forall
+                      :c-var-name var-name'}]
+        (-> (instantiate (ctx-concat ctx [ctx-elem]) ; Why wasn't this a ctx-conj? added to the other end?
+                         t-var-name
+                         :left
+                         (type-substitute {:t-op :t-var ; Is this fresh renaming necessary?
+                                           :t-var-name var-name'}
+                                          (:t-var-name typ)
+                                          (:t-ret typ)))
+            (ctx-drop ctx-elem)))
+    :right
+    ,  (let [var-name' (gensym) ; This one is the difference! it flips the forall to an existential!.
+             ctx-marker (c-marker var-name')
+             ctx-elem (c-exists-solved var-name')]
+         (-> (instantiate (ctx-concat ctx [ctx-marker ctx-elem]) ; Why wasn't this a ctx-conj? added to the other end?
+                          t-var-name
+                          :right
+                          (type-substitute {:t-op :t-exists ; and replacing with an exists here instead of forall.
+                                            :t-var-name var-name'}
+                                           (:t-var-name typ)
+                                           (:t-ret typ)))
+             (ctx-drop ctx-marker)))))
 
 (defn subtype
   "typ1 < typ2 - returns a new context"
