@@ -302,61 +302,61 @@
     (prn "typechecked" (:op expr) [{:ctx ctx} expr typ "->" r])
     r))
 
-(defn typesynth
-  "returns {:type t :ctx c} -- does not type-apply the result (should it?)"
-  [ctx expr]
-  (prn "typesynth" (:op expr) [ctx expr])
-  (assert (vector? ctx))
-  (case (:op expr)
-    :const (if (= (:val expr) nil)
-             {:type {:t-op :t-unit} :ctx ctx}
-             (throw (ex-info "Can't synth type for " expr)))
-    :local (if-let [typ (find-var-type ctx (:name expr))] ;; (fn and let vars are both :local) - those bound by the env are inlined it seems? (why would these be and not let-bounds vars?
-             {:type typ :ctx ctx}
-             (throw (ex-info "var not found in context" {:ctx ctx :expr expr})))
-    :with-meta (typesynth ctx (:expr expr))
-    :annotation {:type (:type expr) :ctx (typecheck ctx (:expr expr) (:type expr))}
-    :fn (do (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
-            (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
-            (let [param-name (:name (first (:params (first (:methods expr)))))
-                  ctx-var-name (gensym param-name) ; Since param-name is gensymmed, I'm guessing we can just use the existing one and avoid the renaming?
-                  exists-param (gensym (str "e-" param-name))
-                  exists-ret (gensym "ret")
-                  c-mk (c-marker exists-param)
-                  ctx-var {:c-op :c-var
-                           :c-var-name ctx-var-name
-                           :c-typ {:t-op :t-exists
-                                   :t-var-name exists-param}}
-                  [ctx-l ctx-r]
-                  , (-> (typecheck (ctx-concat ctx [c-mk
-                                                    (c-exists exists-param)
-                                                    (c-exists exists-ret)
-                                                    ctx-var])
-                                   (rename-var ctx-var-name param-name (:body (first (:methods expr))))
-                                   {:t-op :t-exists
-                                    :t-var-name exists-ret})
-                        (ctx-break c-mk))
-                  typ (type-apply ctx-r {:t-op :t-fn
-                                         :t-param {:t-op :t-exists
-                                                   :t-var-name exists-param}
-                                         :t-ret {:t-op :t-exists
-                                                 :t-var-name exists-ret}})
-                  evars (unsolved ctx-r) ;; I think this is becomes a big multi-var forall?
-                  freshes (repeatedly (count evars) #(gensym "freshes"))
-                  typ' (reduce (fn [t [f ev]]
-                                 (type-substitute {:t-op :t-var :t-var-name f} (:c-var-name ev) typ))
-                               typ
-                               (map vector freshes evars))
-                  typ'' (reduce (fn [t f] {:t-op :t-forall
-                                           :t-var-name f
-                                           :t-ret t})
-                                typ'
-                                freshes)]
-              {:type typ''
-               :ctx ctx-l}))
-    :invoke (let [{typ :type ctx' :ctx} (typesynth ctx (:fn expr))]
-              (assert (= 1 (count (:args expr))) "only supports single arguments right now")
-              (typesynth-invoke ctx' (type-apply ctx' typ) (first (:args expr))))))
+(defmulti typesynth (fn [ctx expr] (:op expr)))
+(defmethod typesynth :const [ctx expr]
+  (if (= (:val expr) nil)
+    {:type {:t-op :t-unit} :ctx ctx}
+    (throw (ex-info "Can't synth type for " expr))))
+(defmethod typesynth :local [ctx expr]
+  (if-let [typ (find-var-type ctx (:name expr))] ;; (fn and let vars are both :local) - those bound by the env are inlined it seems? (why would these be and not let-bounds vars?
+    {:type typ :ctx ctx}
+    (throw (ex-info "var not found in context" {:ctx ctx :expr expr}))))
+(defmethod typesynth :with-meta [ctx expr] (typesynth ctx (:expr expr)))
+(defmethod typesynth :annotation [ctx expr]
+  {:type (:type expr) :ctx (typecheck ctx (:expr expr) (:type expr))})
+(defmethod typesynth :fn [ctx expr]
+  (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
+  (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
+  (let [param-name (:name (first (:params (first (:methods expr)))))
+        ctx-var-name (gensym param-name) ; Since param-name is gensymmed, I'm guessing we can just use the existing one and avoid the renaming?
+        exists-param (gensym (str "e-" param-name))
+        exists-ret (gensym "ret")
+        c-mk (c-marker exists-param)
+        ctx-var {:c-op :c-var
+                 :c-var-name ctx-var-name
+                 :c-typ {:t-op :t-exists
+                         :t-var-name exists-param}}
+        [ctx-l ctx-r]
+        , (-> (typecheck (ctx-concat ctx [c-mk
+                                          (c-exists exists-param)
+                                          (c-exists exists-ret)
+                                          ctx-var])
+                         (rename-var ctx-var-name param-name (:body (first (:methods expr))))
+                         {:t-op :t-exists
+                          :t-var-name exists-ret})
+              (ctx-break c-mk))
+        typ (type-apply ctx-r {:t-op :t-fn
+                               :t-param {:t-op :t-exists
+                                         :t-var-name exists-param}
+                               :t-ret {:t-op :t-exists
+                                       :t-var-name exists-ret}})
+        evars (unsolved ctx-r) ;; I think this is becomes a big multi-var forall?
+        freshes (repeatedly (count evars) #(gensym "freshes"))
+        typ' (reduce (fn [t [f ev]]
+                       (type-substitute {:t-op :t-var :t-var-name f} (:c-var-name ev) typ))
+                     typ
+                     (map vector freshes evars))
+        typ'' (reduce (fn [t f] {:t-op :t-forall
+                                 :t-var-name f
+                                 :t-ret t})
+                      typ'
+                      freshes)]
+    {:type typ''
+     :ctx ctx-l}))
+(defmethod typesynth :invoke [ctx expr]
+  (let [{typ :type ctx' :ctx} (typesynth ctx (:fn expr))]
+    (assert (= 1 (count (:args expr))) "only supports single arguments right now")
+    (typesynth-invoke ctx' (type-apply ctx' typ) (first (:args expr)))))
 
 (defn typesynth-invoke
   "type checks the actual argument of an invocation, given the type of the function."
