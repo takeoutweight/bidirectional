@@ -467,51 +467,62 @@
                                            (:t-ret typ)))
              (ctx-drop ctx-marker)))))
 
-(defn subtype
+(defmulti subtype
   "typ1 < typ2 - returns a new context"
+  (fn [ctx typ1 typ2] [(:t-op typ1) (:t-op typ2)]))
+
+(defmethod subtype [:t-unit :t-unit]
   [ctx typ1 typ2]
-  (prn "subtype" [ctx typ1 typ2])
-  (let [err (fn [msg] (throw (ex-info msg {:ctx ctx :t1 typ1 :t2 typ2})))]
-    (case [(:t-op typ1) (:t-op typ2)]
-      [:t-unit :t-unit] ctx
-      [:t-var :t-var] (if (= (:t-var-name typ1) (:t-var-name typ1)) ctx (err "Vars don't match"))
-      [:t-fn :t-fn] (let [ctx' (subtype ctx (:t-param typ2) (:t-param typ1))] ; Note polarity swap!
-                      (subtype ctx' (type-apply ctx' (:t-ret typ1))  (type-apply ctx' (:t-ret typ2))))
-      (cond
-        (= :t-forall (:t-op typ2)) (let [var-name' (gensym "subtype-r")
-                                         ctx-elem {:c-op :c-forall
-                                                   :c-var-name var-name'}]
-                                     (-> (subtype (ctx-concat ctx [ctx-elem])
-                                                  typ1
-                                                  (type-substitute {:t-op :t-var
-                                                                    :t-var-name var-name'}
-                                                                   (:t-var-name typ2)
-                                                                   (:t-ret typ2)))
-                                         (ctx-drop ctx-elem)))
-        (= :t-forall (:t-op typ1)) (let [var-name' (gensym "subtype-l")]
-                                     (-> (subtype (ctx-concat ctx [(c-marker var-name')
-                                                                   {:c-op :c-exists
-                                                                    :c-var-name var-name'}])
-                                                  (type-substitute {:t-op :t-exists
-                                                                    :t-var-name var-name'}
-                                                                   (:t-var-name typ1)
-                                                                   (:t-ret typ1))
-                                                  typ2)
-                                         (ctx-drop (c-marker var-name'))))
-        (and (= :t-exists (:t-op typ1))
-             (= :t-exists (:t-op typ2))
-             (= (:t-var-name typ1) (:t-var-name typ2))
-             (contains? (existentials ctx) (:t-var-name typ1)))
-        , ctx
-        (and (= :t-exists (:t-op typ1))
-             (contains? (existentials ctx) (:t-var-name typ1))
-             (not (contains? (free-t-vars typ2) (:t-var-name typ1))))
-        , (instantiate ctx (:t-var-name typ1) :left typ2)
-        (and (= :t-exists (:t-op typ2))
-             (contains? (existentials ctx) (:t-var-name typ2))
-             (not (contains? (free-t-vars typ1) (:t-var-name typ2))))
-        , (instantiate ctx (:t-var-name typ2) :right typ1)
-        :else (err "No matching subtype case")))))
+  ctx)
+
+(defmethod subtype [:t-var :t-var]
+  [ctx typ1 typ2]
+  (if (= (:t-var-name typ1) (:t-var-name typ1))
+    ctx
+    (throw (ex-info "Vars don't match" {:ctx ctx :t1 typ1 :t2 typ2}))))
+
+(defmethod subtype [:t-fn :t-fn]
+  [ctx typ1 typ2]
+  (let [ctx' (subtype ctx (:t-param typ2) (:t-param typ1))] ; Note polarity swap!
+    (subtype ctx' (type-apply ctx' (:t-ret typ1))  (type-apply ctx' (:t-ret typ2)))))
+
+(defmethod subtype :default
+  [ctx typ1 typ2]
+  (cond
+    (= :t-forall (:t-op typ2)) (let [var-name' (gensym "subtype-r")
+                                     ctx-elem {:c-op :c-forall
+                                               :c-var-name var-name'}]
+                                 (-> (subtype (ctx-concat ctx [ctx-elem])
+                                              typ1
+                                              (type-substitute {:t-op :t-var
+                                                                :t-var-name var-name'}
+                                                               (:t-var-name typ2)
+                                                               (:t-ret typ2)))
+                                     (ctx-drop ctx-elem)))
+    (= :t-forall (:t-op typ1)) (let [var-name' (gensym "subtype-l")]
+                                 (-> (subtype (ctx-concat ctx [(c-marker var-name')
+                                                               {:c-op :c-exists
+                                                                :c-var-name var-name'}])
+                                              (type-substitute {:t-op :t-exists
+                                                                :t-var-name var-name'}
+                                                               (:t-var-name typ1)
+                                                               (:t-ret typ1))
+                                              typ2)
+                                     (ctx-drop (c-marker var-name'))))
+    (and (= :t-exists (:t-op typ1))
+         (= :t-exists (:t-op typ2))
+         (= (:t-var-name typ1) (:t-var-name typ2))
+         (contains? (existentials ctx) (:t-var-name typ1)))
+    , ctx
+    (and (= :t-exists (:t-op typ1))
+         (contains? (existentials ctx) (:t-var-name typ1))
+         (not (contains? (free-t-vars typ2) (:t-var-name typ1))))
+    , (instantiate ctx (:t-var-name typ1) :left typ2)
+    (and (= :t-exists (:t-op typ2))
+         (contains? (existentials ctx) (:t-var-name typ2))
+         (not (contains? (free-t-vars typ1) (:t-var-name typ2))))
+    , (instantiate ctx (:t-var-name typ2) :right typ1)
+    :else (throw (ex-info "No matching clause" {:ctx ctx :t1 typ1 :t2 typ2}))))
 
 ;;;;;;;;; Scratch ;;;;;;;;;
 
