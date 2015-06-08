@@ -51,19 +51,21 @@
   [ctx]
   (into #{} (map :c-var-name (filter #(#{:c-exists :c-exists-solved} (:c-op %)) ctx))))
 
-(defn type-wf ;; cf typewf Contex.hs
-  "returns a boolean"
-  [ctx typ]
-  (case (:t-op typ)
-    :t-unit true
-    :t-var (contains? (into #{} (map :c-var-name (filter #(= :c-forall (:c-op %)) ctx)))
-                      (:t-var-name typ))
-    :t-fn (and (type-wf ctx (:t-param typ))
-               (type-wf ctx (:t-ret typ)))
-    :t-forall (type-wf (ctx-conj ctx {:c-op :c-forall :c-var-name (:t-var-name typ)})
-                       (:t-ret typ))
-    :t-exists (contains? (existentials ctx)
-                         (:t-var-name typ))))
+(defmulti type-wf (fn [ctx typ] (:t-op typ)))
+(defmethod type-wf :t-unit [ctx typ]
+  true)
+(defmethod type-wf :t-var [ctx typ]
+  (contains? (into #{} (map :c-var-name (filter #(= :c-forall (:c-op %)) ctx)))
+             (:t-var-name typ)))
+(defmethod type-wf :t-fn [ctx typ]
+  (and (type-wf ctx (:t-param typ))
+       (type-wf ctx (:t-ret typ))))
+(defmethod type-wf :t-forall [ctx typ]
+  (type-wf (ctx-conj ctx {:c-op :c-forall :c-var-name (:t-var-name typ)})
+           (:t-ret typ)))
+(defmethod type-wf :t-exists [ctx typ]
+  (contains? (existentials ctx)
+             (:t-var-name typ)))
 
 ;;; FIXME I'm not sure this is what this fn is doing? I think we're effectively
 ;;; resolving to the "leftmost" unsolved existential, even if it's not yet
