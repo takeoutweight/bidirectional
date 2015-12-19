@@ -179,7 +179,7 @@
 
 
 (defn solve
-  "This unifies an existentail to a monotype"
+  "This unifies an existential to a monotype"
   [ctx t-var-name typ]
   (assert (monotype? typ) "Can only solve for monotypes -- forgot a guard?")
   (let [[ctx-l ctx-r] (ctx-break ctx {:c-op :c-exists :c-var-name t-var-name})]
