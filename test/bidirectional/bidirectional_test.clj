@@ -28,9 +28,10 @@
                          :t-ret {:t-op ::ut/t-unit}}})
          [])
       "Checking agrees with inference")
-  (is (= (infer '(ann (fn [x] nil) {:t-op ::ft/t-fn
-                                    :t-param {:t-op ::ut/t-unit}
-                                    :t-ret   {:t-op ::ut/t-unit}}))
+  (is (= (infer '(bidirectional.bidirectional/ann
+                  (fn [x] nil) {:t-op ::ft/t-fn
+                                :t-param {:t-op ::ut/t-unit}
+                                :t-ret   {:t-op ::ut/t-unit}}))
          {:t-ret {:t-op ::ut/t-unit}, :t-param {:t-op ::ut/t-unit}, :t-op ::ft/t-fn})
       "explicit annotations synthesize the annotated type")
   (is (= (infer '((fn [x] (x nil)) (ann (fn [x] x) {:t-op ::bi/t-forall, :t-var-name 'a,
