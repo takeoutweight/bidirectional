@@ -219,18 +219,6 @@
            (vec) (for [s ss])
            (rename-var new-name for-name s))
       (update-in [:ret] #(rename-var new-name for-name %))))
-(defmethod rename-var :invoke
-  [new-name for-name expr]
-  (-> (<<- (update-in expr [:args]) (fn [as])
-           (vec) (for [a as])
-           (rename-var new-name for-name a))
-      (update-in [:fn] #(rename-var new-name for-name %))))
-(defmethod rename-var :fn
-  [new-name for-name expr]
-  (<<- (update-in expr [:methods]) (fn [ms])
-       (vec) (for [m ms])
-       (update-in m [:body]) (fn [b])
-       (rename-var new-name for-name b)))
 (defmethod rename-var :local
   [new-name for-name expr]
   (if (= for-name (:name expr))
@@ -251,7 +239,7 @@
     #_(prn "type-substitute" [new-typ t-var-name typ "->" r])
     r))
 
-(declare subtype typesynth typesynth-invoke typecheck)
+(declare subtype typesynth typecheck)
 
 (derive ::t-exists ::t-any-type)
 (derive ::t-forall ::t-any-type)
@@ -298,43 +286,6 @@
 (defmethod typesynth :with-meta [ctx expr] (typesynth ctx (:expr expr)))
 (defmethod typesynth :annotation [ctx expr]
   {:type (:type expr) :ctx (typecheck ctx (:expr expr) (:type expr))})
-(defmethod typesynth :invoke [ctx expr]
-  (let [{typ :type ctx' :ctx} (typesynth ctx (:fn expr))]
-    (assert (= 1 (count (:args expr))) "only supports single arguments right now")
-    (typesynth-invoke ctx' (type-apply ctx' typ) (first (:args expr)))))
-
-(defn typesynth-invoke
-  "type checks the actual argument of an invocation, given the type of the function."
-  [ctx typ expr]
-  (assert (vector? ctx))
-  (case (:t-op typ)
-    :with-meta (typesynth-invoke ctx typ (:expr expr))
-    ::t-forall (let [g (gensym "invokeforall")]
-                 (typesynth-invoke (ctx-conj ctx {:c-op :c-exists :c-var-name g})
-                                   (type-substitute {:t-op ::t-exists :t-var-name g}
-                                                    (:t-var-name typ)
-                                                    (:t-ret typ))
-                                   expr))
-    ::t-exists (let [garg (gensym "invoke-exarg") ;; refining our knowledge of an existential variable
-                     gret (gensym "invoke-gret")
-                     [ctx-l ctx-r] (ctx-break ctx {:c-op :c-exists :c-var-name (:t-var-name typ)})
-                     ctx' (typecheck (ctx-concat ctx-l
-                                                 [{:c-op :c-exists :c-var-name garg}
-                                                  {:c-op :c-exists :c-var-name gret}
-                                                  {:c-op :c-exists-solved
-                                                   :c-var-name (:t-var-name typ)
-                                                   :c-typ {:t-op :bidirectional.fn-type/t-fn
-                                                           :t-param {:t-op ::t-exists :t-var-name garg}
-                                                           :t-ret {:t-op ::t-exists :t-var-name gret}}}]
-                                                 ctx-r)
-                                     expr
-                                     {:t-op ::t-exists :t-var-name garg})]
-                 {:type {:t-op ::t-exists :t-var-name gret}
-                  :ctx ctx'})
-    :bidirectional.fn-type/t-fn (let [ctx' (typecheck ctx expr (:t-param typ))]
-                                             {:type (:t-ret typ)
-                                              :ctx ctx'})
-    (throw (ex-info "Can't check this invoke" {:ctx ctx :typ typ :expr expr}))))
 
 (defn flip [dir]
   (case dir :left :right :right :left))

@@ -14,7 +14,54 @@
                                       (monotype? (:t-ret typ))))
 
 (defmethod free-t-vars ::t-fn [typ] (set/union (free-t-vars (:t-param typ))
-                                              (free-t-vars (:t-ret typ))))
+                                               (free-t-vars (:t-ret typ))))
+
+(defmethod rename-var :invoke
+  [new-name for-name expr]
+  (-> (<<- (update-in expr [:args]) (fn [as])
+           (vec) (for [a as])
+           (rename-var new-name for-name a))
+      (update-in [:fn] #(rename-var new-name for-name %))))
+
+(defmethod rename-var :fn
+  [new-name for-name expr]
+  (<<- (update-in expr [:methods]) (fn [ms])
+       (vec) (for [m ms])
+       (update-in m [:body]) (fn [b])
+       (rename-var new-name for-name b)))
+
+(defn typesynth-invoke
+  "type checks the actual argument of an invocation, given the type of the function."
+  [ctx typ expr]
+  (assert (vector? ctx))
+  (case (:t-op typ)
+    :with-meta (typesynth-invoke ctx typ (:expr expr))
+    ::bi/t-forall (let [g (gensym "invokeforall")]
+                    (typesynth-invoke (ctx-conj ctx {:c-op :c-exists :c-var-name g})
+                                      (type-substitute {:t-op ::bi/t-exists :t-var-name g}
+                                                       (:t-var-name typ)
+                                                       (:t-ret typ))
+                                      expr))
+    ::bi/t-exists (let [garg (gensym "invoke-exarg") ;; refining our knowledge of an existential variable
+                        gret (gensym "invoke-gret")
+                        [ctx-l ctx-r] (ctx-break ctx {:c-op :c-exists :c-var-name (:t-var-name typ)})
+                        ctx' (typecheck (ctx-concat ctx-l
+                                                    [{:c-op :c-exists :c-var-name garg}
+                                                     {:c-op :c-exists :c-var-name gret}
+                                                     {:c-op :c-exists-solved
+                                                      :c-var-name (:t-var-name typ)
+                                                      :c-typ {:t-op :bidirectional.fn-type/t-fn
+                                                              :t-param {:t-op ::bi/t-exists :t-var-name garg}
+                                                              :t-ret {:t-op ::bi/t-exists :t-var-name gret}}}]
+                                                    ctx-r)
+                                        expr
+                                        {:t-op ::bi/t-exists :t-var-name garg})]
+                    {:type {:t-op ::bi/t-exists :t-var-name gret}
+                     :ctx ctx'})
+    :bidirectional.fn-type/t-fn (let [ctx' (typecheck ctx expr (:t-param typ))]
+                                  {:type (:t-ret typ)
+                                   :ctx ctx'})
+    (throw (ex-info "Can't check this invoke" {:ctx ctx :typ typ :expr expr}))))
 
 (defmethod typesynth :fn [ctx expr]
   (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
@@ -55,6 +102,11 @@
                       freshes)]
     {:type typ''
      :ctx ctx-l}))
+
+(defmethod typesynth :invoke [ctx expr]
+  (let [{typ :type ctx' :ctx} (typesynth ctx (:fn expr))]
+    (assert (= 1 (count (:args expr))) "only supports single arguments right now")
+    (typesynth-invoke ctx' (type-apply ctx' typ) (first (:args expr)))))
 
 (defmethod instantiate-poly ::t-fn
   [ctx t-var-name dir typ]
