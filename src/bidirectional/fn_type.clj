@@ -81,7 +81,7 @@
   (let [ctx' (subtype ctx (:t-param typ2) (:t-param typ1))] ; Note polarity swap!
     (subtype ctx' (type-apply ctx' (:t-ret typ1))  (type-apply ctx' (:t-ret typ2)))))
 
-(defmethod typecheck-m [:fn ::t-fn]
+(defmethod typecheck [:fn ::t-fn]
   [ctx expr typ]
   (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
   (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")

@@ -251,61 +251,29 @@
     #_(prn "type-substitute" [new-typ t-var-name typ "->" r])
     r))
 
-(declare subtype typesynth typesynth-invoke typecheck-m)
-
-(defn typecheck
-  "returns updated ctx"
-  [ctx expr typ]
-  #_(typecheck-m ctx expr typ)
-  (let [r (cond
-            (= :with-meta (:op expr)) (typecheck ctx (:expr expr) typ)
-            (= :do (:op expr)) (typecheck ctx (:ret expr) typ)
-            (and (= :const (:op expr))
-                 (= nil (:val expr))
-                 (= :bidirectional.unit-type/t-unit (:t-op typ))) ctx
-            (and (= :fn (:op expr))
-                 (= :bidirectional.fn-type/t-fn (:t-op typ)))
-            , (do (assert (= 1 (count (:methods expr))) "only single-arity methods supported")
-                  (assert (= 1 (count (:params (first (:methods expr))))) "only single argument supported")
-                  (let [param-name (:name (first (:params (first (:methods expr)))))
-                        ctx-var-name (gensym param-name) ; Since param-name is gensymmed, I'm guessing we can just use the existing one and avoid the renaming?
-                        ctx-elem {:c-op :c-var
-                                  :c-var-name ctx-var-name
-                                  :c-typ (:t-param typ)}]
-                    (-> (typecheck (ctx-conj ctx ctx-elem)
-                                   (rename-var ctx-var-name param-name (:body (first (:methods expr))))
-                                   (:t-ret typ))
-                        (ctx-drop ctx-elem))))
-            (= ::t-forall (:t-op typ))
-            , (let [fresh (gensym (:t-var-name typ))
-                    ctx-elem {:c-op :c-forall
-                              :c-var-name fresh}]
-                (-> (typecheck (ctx-conj ctx ctx-elem)
-                               expr
-                               (type-substitute {:t-op ::t-var :t-var-name fresh}
-                                                (:t-var-name typ)
-                                                (:t-ret typ)))
-                    (ctx-drop ctx-elem)))
-            :else (let [{typ' :type ctx' :ctx} (typesynth ctx expr)]
-                    (prn "synthed: " {:type typ' :ctx ctx'})
-                    (subtype ctx' (type-apply ctx' typ') (type-apply ctx' typ))))]
-    (prn "typechecked" (:op expr) [{:ctx ctx} expr typ "->" r])
-    r))
+(declare subtype typesynth typesynth-invoke typecheck)
 
 (derive ::t-exists ::t-any-type)
 (derive ::t-forall ::t-any-type)
 (derive ::t-var    ::t-any-type)
 
-(defmulti typecheck-m (fn [ctx expr typ] (prn "typecheck:" [ctx expr typ]) [(:op expr) (:t-op typ)]))
-(defmethod typecheck-m [:with-meta ::t-any-type]
-  [ctx expr typ]
-  ctx)
+(defmulti operator
+  "treat certain values (like `nil`) as different operators than the analyzer does."
+  (fn [expr] (if (= :const (:op expr)) (type (:val expr)) :default)))
 
-(defmethod typecheck-m [:do ::t-any-type]
-  [ctx expr typ]
-  ctx)
+(defmethod operator :default [expr] (:op expr))
 
-(defmethod typecheck-m :default
+(defmulti typecheck (fn [ctx expr typ] (prn "typecheck:" [ctx expr typ]) [(operator expr) (:t-op typ)]))
+
+(defmethod typecheck [:with-meta ::t-any-type]
+  [ctx expr typ]
+  (typecheck ctx (:expr expr) typ))
+
+(defmethod typecheck [:do ::t-any-type]
+  [ctx expr typ]
+  (typecheck ctx (:ret expr) typ))
+
+(defmethod typecheck :default
   [ctx expr typ]
   (cond
     (= ::t-forall (:t-op typ))

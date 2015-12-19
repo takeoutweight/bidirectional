@@ -21,6 +21,8 @@
   [ctx typ1 typ2]
   ctx)
 
-(defmethod typecheck-m [:const ::t-unit]
+(defmethod operator nil [_] :nil)
+
+(defmethod typecheck [:nil ::t-unit]
   [ctx expr typ]
   ctx)
