@@ -86,3 +86,7 @@
                   :t-param {:t-op ::ut/t-unit}
                   :t-ret   {:t-op ::ut/t-unit}}})
       "fancy application can be fixed to a monotype with an annotation"))
+
+(deftest hmap-test
+  ;;; FIXME
+  #_(infer '(((fn [x] (fn [y] (x y))) :x) {:x nil})))

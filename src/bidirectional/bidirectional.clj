@@ -172,6 +172,11 @@
   [c-var-name typ]
   {:c-op :c-exists-solved :c-var-name c-var-name :c-typ typ})
 
+(defn t-exists
+  [t-var-name]
+  {:t-op ::t-exists
+   :t-var-name t-var-name})
+
 (defmulti monotype? :t-op)
 (defmethod monotype? ::t-var  [_] true)
 (defmethod monotype? ::t-exists [_] true)
@@ -202,7 +207,9 @@
 
 (defn operator
   "treat const values (like `nil`) as different operators than the analyzer does."
-  [expr] (if (= :const (:op expr)) (:type expr) (:op expr)))
+  [expr] (let [r (if (= :const (:op expr)) (:type expr) (:op expr))]
+           (when (nil? r) (throw (ex-info "Nil opertator:" {:expr expr})))
+           r))
 
 (defmulti rename-var
   "a la substitution: [new-name / for-name]expr
@@ -226,6 +233,12 @@
   (if (= for-name (:name expr))
     (assoc expr :name new-name)
     expr))
+(defmethod rename-var :invoke
+  [new-name for-name expr]
+  (-> (<<- (update-in expr [:args]) (fn [as])
+           (vec) (for [a as])
+           (rename-var new-name for-name a))
+      (update-in [:fn] #(rename-var new-name for-name %))))
 
 ;;; Not a multimethod since it's assumed the map-type should be you need to implement
 (defn type-substitute
@@ -247,6 +260,7 @@
 (derive ::t-forall ::t-any-type)
 (derive ::t-var    ::t-any-type)
 
+;; returns a context
 (defmulti typecheck (fn [ctx expr typ] (prn "typecheck:" [ctx expr typ]) [(operator expr) (:t-op typ)]))
 
 (defmethod typecheck [:with-meta ::t-any-type]
@@ -274,6 +288,14 @@
             (prn "synthed: " {:type typ' :ctx ctx'})
             (subtype ctx' (type-apply ctx' typ') (type-apply ctx' typ)))))
 
+;; Let anybody hijack invoke expressions using specific fn vars to dispatch.
+(defmulti typesynth-invoke (fn [ctx expr] (let [v (get-in expr [:fn :var])]
+                                            (if (var? v)
+                                              (symbol (-> v .ns .name name)
+                                                      (-> v .sym name))
+                                              nil))))
+
+;; Returns {:type typ :ctx ctx}
 (defmulti typesynth (fn [ctx expr] (prn "typesynth" [ctx expr]) (operator expr)))
 (defmethod typesynth :local [ctx expr]
   (if-let [typ (find-var-type ctx (:name expr))] ;; (fn and let vars are both :local) - those bound by the env are inlined it seems? (why would these be and not let-bounds vars?
@@ -282,6 +304,9 @@
 (defmethod typesynth :with-meta [ctx expr] (typesynth ctx (:expr expr)))
 (defmethod typesynth :annotation [ctx expr]
   {:type (:type expr) :ctx (typecheck ctx (:expr expr) (:type expr))})
+(defmethod typesynth :invoke [ctx expr] (typesynth-invoke ctx expr))
+
+
 
 (defn flip [dir]
   (case dir :left :right :right :left))
