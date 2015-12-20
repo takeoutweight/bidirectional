@@ -134,23 +134,10 @@
                 (map-type renumber typ)))]
       (renumber typ))))
 
+;; for ad-hoc hijaking of houw analysis works.
 (defn analyze-annotations
-  "changes analysis of forms (bidirectional.bidirectional/ann expr type) from :invoke to
-  :annotation"
   [expr]
   (cond
-    (and (= :invoke (:op expr))
-         (= :var (:op (:fn expr)) )
-         (= #'bidirectional.bidirectional/ann (:var (:fn expr))))
-    , (do
-        (assert (= 2 (count (:args expr))) "annotation should have two arguments: (ann expr type)")
-        (assert (:literal? (second (:args expr))) "second argument to ann must be a type literal")
-        (-> expr
-            (assoc :op :annotation)
-            (assoc :type (:val (second (:args expr))))
-            (assoc :expr (analyze-annotations (first (:args expr))))
-            (assoc :children [:expr])
-            (dissoc :args :fn :result :tag :o-tag)))
     (vector? expr) (vec (map analyze-annotations expr)) ;; eg: for :args children traversal
     :else (reduce (fn [e key]
                     (update-in e [key] analyze-annotations))
@@ -295,6 +282,14 @@
                                                       (-> v .sym name))
                                               nil))))
 
+(defmethod typesynth-invoke 'bidirectional.bidirectional/ann
+  [ctx expr]
+  (assert (= 2 (count (:args expr))) "annotation should have two arguments: (ann expr type)")
+  (assert (:literal? (second (:args expr))) "second argument to ann must be a type literal")
+  (let [anned-expr  (first (:args expr))
+        typ (:val (second (:args expr)))]
+    {:type typ :ctx (typecheck ctx anned-expr typ)}))
+
 ;; Returns {:type typ :ctx ctx}
 (defmulti typesynth (fn [ctx expr] (prn "typesynth" [ctx expr]) (operator expr)))
 (defmethod typesynth :local [ctx expr]
@@ -302,8 +297,6 @@
     {:type typ :ctx ctx}
     (throw (ex-info "var not found in context" {:ctx ctx :expr expr}))))
 (defmethod typesynth :with-meta [ctx expr] (typesynth ctx (:expr expr)))
-(defmethod typesynth :annotation [ctx expr]
-  {:type (:type expr) :ctx (typecheck ctx (:expr expr) (:type expr))})
 (defmethod typesynth :invoke [ctx expr] (typesynth-invoke ctx expr))
 
 
