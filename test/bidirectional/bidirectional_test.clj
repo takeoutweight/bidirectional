@@ -34,10 +34,11 @@
                                 :t-ret   {:t-op ::ut/t-unit}}))
          {:t-ret {:t-op ::ut/t-unit}, :t-param {:t-op ::ut/t-unit}, :t-op ::ft/t-fn})
       "explicit annotations synthesize the annotated type")
-  (is (= (infer '((fn [x] (x nil)) (ann (fn [x] x) {:t-op ::bi/t-forall, :t-var-name 'a,
-                                                    :t-ret {:t-op ::ft/t-fn,
-                                                            :t-param {:t-op ::bi/t-var, :t-var-name 'a},
-                                                            :t-ret {:t-op ::bi/t-var, :t-var-name 'a}}})))
+  (is (= (infer '((fn [x] (x nil)) (bidirectional.bidirectional/ann
+                                    (fn [x] x) {:t-op ::bi/t-forall, :t-var-name 'a,
+                                                :t-ret {:t-op ::ft/t-fn,
+                                                        :t-param {:t-op ::bi/t-var, :t-var-name 'a},
+                                                        :t-ret {:t-op ::bi/t-var, :t-var-name 'a}}})))
          {:t-op ::ut/t-unit})
       "You can annotate argument sub-expressions")
   (is (thrown? clojure.lang.ExceptionInfo
@@ -65,19 +66,21 @@
           :t-param {:t-op ::bi/t-exists, :t-var-name 'G},
           :t-ret {:t-op ::bi/t-exists, :t-var-name 'G}}))
   ;; and is THIS right as well?
-  (is (= (infer '(ann ((fn [x] x) (fn [x] x)) {:t-op ::bi/t-forall :t-var-name 'a
-                                               :t-ret {:t-op ::ft/t-fn
-                                                       :t-param {:t-op ::bi/t-var :t-var-name 'a}
-                                                       :t-ret   {:t-op ::bi/t-var :t-var-name 'a}}}))
+  (is (= (infer '(bidirectional.bidirectional/ann
+                  ((fn [x] x) (fn [x] x)) {:t-op ::bi/t-forall :t-var-name 'a
+                                           :t-ret {:t-op ::ft/t-fn
+                                                   :t-param {:t-op ::bi/t-var :t-var-name 'a}
+                                                   :t-ret   {:t-op ::bi/t-var :t-var-name 'a}}}))
          {:t-op ::bi/t-forall :t-var-name 'a
           :t-ret {:t-op ::ft/t-fn
                   :t-param {:t-op ::bi/t-var :t-var-name 'a}
                   :t-ret   {:t-op ::bi/t-var :t-var-name 'a}}})
       "If we explicitly ask for polymorphism on the fancy application we get it")
-  (is (= (infer '(ann ((fn [x] x) (fn [x] x)) {:t-op ::bi/t-forall :t-var-name 'a
-                                               :t-ret {:t-op ::ft/t-fn
-                                                       :t-param {:t-op ::ut/t-unit}
-                                                       :t-ret   {:t-op ::ut/t-unit}}}))
+  (is (= (infer '(bidirectional.bidirectional/ann
+                  ((fn [x] x) (fn [x] x)) {:t-op ::bi/t-forall :t-var-name 'a
+                                           :t-ret {:t-op ::ft/t-fn
+                                                   :t-param {:t-op ::ut/t-unit}
+                                                   :t-ret   {:t-op ::ut/t-unit}}}))
          {:t-op ::bi/t-forall :t-var-name 'a
           :t-ret {:t-op ::ft/t-fn
                   :t-param {:t-op ::ut/t-unit}

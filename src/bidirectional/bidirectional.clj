@@ -200,13 +200,15 @@
   (let [ctx-l (ctx-drop ctx (c-exists t-var-name-b))]
     (contains? (existentials ctx-l) t-var-name-a)))
 
+(defn operator
+  "treat const values (like `nil`) as different operators than the analyzer does."
+  [expr] (if (= :const (:op expr)) (:type expr) (:op expr)))
+
 (defmulti rename-var
   "a la substitution: [new-name / for-name]expr
   This assumes analysis has already freshly renamed all variables.
   for-name is the actual symbol name to rebind (not the analyzed local var form)"
-  (fn [new-name for-name expr] (:op expr)) )
-(defmethod rename-var :const
-  [new-name for-name expr] expr)
+  (fn [new-name for-name expr] (operator expr)))
 (defmethod rename-var :with-meta
   [new-name for-name expr]
   (update-in expr [:expr] #(rename-var new-name for-name %)))
@@ -245,12 +247,6 @@
 (derive ::t-forall ::t-any-type)
 (derive ::t-var    ::t-any-type)
 
-(defmulti operator
-  "treat certain values (like `nil`) as different operators than the analyzer does."
-  (fn [expr] (if (= :const (:op expr)) (type (:val expr)) :default)))
-
-(defmethod operator :default [expr] (:op expr))
-
 (defmulti typecheck (fn [ctx expr typ] (prn "typecheck:" [ctx expr typ]) [(operator expr) (:t-op typ)]))
 
 (defmethod typecheck [:with-meta ::t-any-type]
@@ -278,7 +274,7 @@
             (prn "synthed: " {:type typ' :ctx ctx'})
             (subtype ctx' (type-apply ctx' typ') (type-apply ctx' typ)))))
 
-(defmulti typesynth (fn [ctx expr] (prn "typesynth" [ctx expr]) (:op expr)))
+(defmulti typesynth (fn [ctx expr] (prn "typesynth" [ctx expr]) (operator expr)))
 (defmethod typesynth :local [ctx expr]
   (if-let [typ (find-var-type ctx (:name expr))] ;; (fn and let vars are both :local) - those bound by the env are inlined it seems? (why would these be and not let-bounds vars?
     {:type typ :ctx ctx}

@@ -12,7 +12,10 @@
 
 (defmethod free-t-vars ::t-unit [_] #{})
 
-(defmethod typesynth :const [ctx expr]
+(defmethod rename-var :nil
+  [new-name for-name expr] expr)
+
+(defmethod typesynth :nil [ctx expr]
   (if (= (:val expr) nil)
     {:type {:t-op ::t-unit} :ctx ctx}
     (throw (ex-info "Can't synth type for " expr))))
@@ -20,8 +23,6 @@
 (defmethod subtype [::t-unit ::t-unit]
   [ctx typ1 typ2]
   ctx)
-
-(defmethod operator nil [_] :nil)
 
 (defmethod typecheck [:nil ::t-unit]
   [ctx expr typ]
