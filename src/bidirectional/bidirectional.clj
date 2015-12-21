@@ -28,6 +28,21 @@
   [& ctxs]
   (vec (apply concat ctxs)))
 
+(defn c-var-name-break
+  "returns [ctx-left ctx-right]"
+  [ctx c-var-name]
+  (let [idx (ffirst (filter (fn [[i e]] (if (= (:c-var-name e) c-var-name) i nil)) (map-indexed vector ctx)))]
+    (if (nil? idx) (throw (ex-info "Can't find element to break" {:ctx ctx :ctx-elem c-var-name}))
+        [(subvec ctx 0 idx)
+         (subvec ctx (inc idx) (count ctx))])))
+
+(defn c-update-var
+  "returns updated ctx"
+  [ctx c-var-name f]
+  (let [idx (ffirst (filter (fn [[i e]] (if (= (:c-var-name e) c-var-name) i nil)) (map-indexed vector ctx)))]
+    (if (nil? idx) (throw (ex-info "Can't find element to break" {:ctx ctx :ctx-elem c-var-name}))
+        (update-in ctx [idx] f))))
+
 (defn ctx-break
   "returns [ctx-left ctx-right]"
   [ctx ctx-elem]
@@ -40,6 +55,11 @@
   "I think this drops everything to the right of elem, including elem."
   [ctx ctx-elem]
   (first (ctx-break ctx ctx-elem)))
+
+(defn c-find-var
+  "Looks up a var in context"
+  [ctx var-name]
+  (first (filter (fn [e] (= (:c-var-name e) var-name)) ctx)))
 
 (defn find-var-type ;; Context.hs
   "Looks up a var in context - returns its type or nil"
@@ -232,7 +252,7 @@
   "sub new-typ for t-var-name in typ"
   [new-typ t-var-name typ]
   (let [r (case (:t-op typ)
-            ::t-var (if (= t-var-name (:t-var-name typ)) new-typ typ)
+            ::t-var    (if (= t-var-name (:t-var-name typ)) new-typ typ)
             ::t-exists (if (= t-var-name (:t-var-name typ)) new-typ typ)
             ::t-forall (if (= t-var-name (:t-var-name typ))
                          (do (println "Should this ever happen with hygenic vars??") typ)
@@ -324,8 +344,9 @@
   (if (ordered? ctx t-var-name (:t-var-name typ)) ;; I guess this has to succeed? This seems to just be careful control over the ctx order.
     (:solved (solve ctx (:t-var-name typ) {:t-op ::t-exists
                                            :t-var-name t-var-name}))
-    (do (throw (ex-info "NOTE: Weird case hit:" {:t-var-name t-var-name :typ typ}))
-        (:solved (solve ctx t-var-name typ)))))
+    (do (throw (ex-info "Weird case hit (this should have been handled by the first call to instantiate?):"
+                        {:t-var-name t-var-name :typ typ}))
+        #_(:solved (solve ctx t-var-name typ)))))
 
 
 
@@ -403,7 +424,7 @@
          (contains? (existentials ctx) (:t-var-name typ2))
          (not (contains? (free-t-vars typ1) (:t-var-name typ2))))
     , (instantiate ctx (:t-var-name typ2) :right typ1)
-    :else (throw (ex-info "No matching clause" {:ctx ctx :t1 typ1 :t2 typ2}))))
+    :else (throw (ex-info "Type error. t1 is not a subtype of t2" {:ctx ctx :t1 typ1 :t2 typ2}))))
 
 ;;;;;;;;; Scratch ;;;;;;;;;
 
@@ -415,13 +436,18 @@
   (assoc (taj/empty-env)
          :locals {'fun1 (taem/elide-meta (taj/analyze+eval '(fn [x] x) (taj/empty-env)))}))
 
-(defn infer
+(defn ctx-infer
   [code]
   (let [ana (-> (taj/analyze+eval code (taj/empty-env))
                 (analyze-annotations))
         {:keys [ctx type]} (typesynth [] ana)]
-    (-> (type-apply ctx type)
-        (renumber-varnames))))
+    {:type (-> (type-apply ctx type)
+               (renumber-varnames))
+     :ctx ctx}))
+
+(defn infer
+  [code]
+  (:type (ctx-infer code)))
 
 (defn check
   "returns context if code typechecks"

@@ -3,7 +3,9 @@
             [clojure.tools.analyzer.jvm :as taj]
             [bidirectional.bidirectional :refer :all :as bi]
             [bidirectional.fn-type :as ft]
-            [bidirectional.unit-type :as ut]))
+            [bidirectional.hmap-type :as ht]
+            [bidirectional.unit-type :as ut])
+  (:import clojure.lang.ExceptionInfo))
 
 (deftest checks
   (is (= (infer '(fn [x] x))
@@ -88,5 +90,17 @@
       "fancy application can be fixed to a monotype with an annotation"))
 
 (deftest hmap-test
-  ;;; FIXME
+  (is (= (infer '{:x nil})
+         {:t-op ::ht/t-hmap, :t-fields {:x {:t-op ::ut/t-unit}}, :t-rest {:t-op ::ht/t-hmap-nil}})
+      "infer basic hmaps")
+  (is (= (infer '(:x {:x {:y nil}}))
+         {:t-op ::ht/t-hmap, :t-fields {:y {:t-op ::ut/t-unit}}, :t-rest {:t-op ::ht/t-hmap-nil}})
+      "infer projections")
+  (is (thrown-with-msg? ExceptionInfo #"is not a subtype"
+                        (infer '(assoc {:x nil} :x (fn [x] x))))
+      "can't use assoc to change type")
+  (is (= (infer '(assoc {:x nil} :x nil))
+         {:t-op ::ht/t-hmap, :t-fields {:x {:t-op ::ut/t-unit}}, :t-rest {:t-op ::ht/t-hmap-nil}})
+      "don't forget principality")
+  ;;; TODO Waiting on instantiate-poly
   #_(infer '(((fn [x] (fn [y] (x y))) :x) {:x nil})))

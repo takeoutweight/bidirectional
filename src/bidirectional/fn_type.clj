@@ -11,7 +11,7 @@
 (defmethod map-type ::t-fn     [f t] (update-keys t [:t-param :t-ret] f))
 
 (defmethod monotype? ::t-fn [typ] (and (monotype? (:t-param typ))
-                                      (monotype? (:t-ret typ))))
+                                       (monotype? (:t-ret typ))))
 
 (defmethod free-t-vars ::t-fn [typ] (set/union (free-t-vars (:t-param typ))
                                                (free-t-vars (:t-ret typ))))
